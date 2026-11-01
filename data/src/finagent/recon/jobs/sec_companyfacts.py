@@ -63,8 +63,9 @@ class SecCompanyFacts:
         for cik in load_ciks(con, self.slice_file):
             fetched = last_fetched.get(cik)
             filed = latest_filed.get(cik)
-            # >= on the date: a filing from the fetch day may have landed after the fetch.
-            if fetched is None or (filed is not None and filed >= fetched.date()):
+            # Both are ISO text. >= on the date: a filing from the fetch day may have landed
+            # after the fetch.
+            if fetched is None or (filed is not None and filed >= fetched[:10]):
                 yield Request(URL.format(cik=cik), cik)
 
     def parse(self, req: Request, body: bytes) -> dict[str, list[dict]]:

@@ -1,16 +1,18 @@
 -- One primary ticker per company (share classes collapse to the alphabetically first).
-CREATE OR REPLACE VIEW v_recent_filings AS
+DROP VIEW IF EXISTS v_recent_filings;
+CREATE VIEW v_recent_filings AS
 SELECT f.filed_date, t.ticker, c.name, f.form, f.report_date, f.url
 FROM filings f
 JOIN companies c USING (cik)
 LEFT JOIN (SELECT cik, min(ticker) AS ticker FROM tickers GROUP BY cik) t USING (cik)
-WHERE f.filed_date >= current_date - INTERVAL 30 DAY
+WHERE f.filed_date >= date('now', '-30 day')
 ORDER BY f.filed_date DESC, t.ticker;
 
 -- Latest value per company per metric, pivoted wide.
 -- Balance-sheet items: latest period of any filing.
 -- Income items: latest full-year (350-380 day) period from a 10-K, so quarters and YTD never mix in.
-CREATE OR REPLACE VIEW v_latest_financials AS
+DROP VIEW IF EXISTS v_latest_financials;
+CREATE VIEW v_latest_financials AS
 WITH tagged AS (
   SELECT cik, period_end, filed_date, value,
     CASE concept
@@ -35,7 +37,8 @@ usable AS (
   SELECT * FROM tagged
   WHERE metric IS NOT NULL
     AND (NOT is_flow
-         OR (form LIKE '10-K%' AND date_diff('day', period_start, period_end) BETWEEN 350 AND 380))
+         OR (form LIKE '10-K%'
+             AND julianday(period_end) - julianday(period_start) BETWEEN 350 AND 380))
 ),
 ranked AS (
   SELECT *, row_number() OVER (
@@ -66,14 +69,21 @@ GROUP BY c.cik, t.ticker, c.name;
 -- Latest public float per company, at or below $2B (the small-cap ceiling). Zero floats
 -- (no public market) are excluded. Float excludes insider/affiliate holdings and can be up to
 -- a year old, so this understates market cap: treat as a first-pass shortlist.
-CREATE OR REPLACE VIEW v_small_cap_candidates AS
+DROP VIEW IF EXISTS v_small_cap_candidates;
+CREATE VIEW v_small_cap_candidates AS
 WITH latest AS (
-  SELECT cik, value AS public_float, period_end AS float_date, location
-  FROM public_float
-  QUALIFY row_number() OVER (PARTITION BY cik ORDER BY period_end DESC) = 1
+  SELECT cik, public_float, float_date, location FROM (
+    SELECT cik, value AS public_float, period_end AS float_date, location,
+      row_number() OVER (PARTITION BY cik ORDER BY period_end DESC) AS rn
+    FROM public_float
+  ) WHERE rn = 1
 ),
 primary_ticker AS (
-  SELECT DISTINCT ON (cik) cik, ticker, exchange FROM tickers ORDER BY cik, ticker
+  SELECT cik, ticker, exchange FROM (
+    SELECT cik, ticker, exchange,
+      row_number() OVER (PARTITION BY cik ORDER BY ticker) AS rn
+    FROM tickers
+  ) WHERE rn = 1
 )
 SELECT p.ticker, c.name, p.exchange, l.public_float, l.float_date, c.sic_desc, l.location, c.cik
 FROM latest l

@@ -12,7 +12,7 @@ TICKERS = [
 
 @pytest.fixture
 def con(tmp_path):
-    c = connect(tmp_path / "t.duckdb")
+    c = connect(tmp_path / "t.db")
     upsert(c, "tickers", TICKERS, ["ticker"])
     yield c
     c.close()

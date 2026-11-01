@@ -10,6 +10,13 @@ One store for all FinAgent data. Recon is one producer, not the owner. Agents an
 - **Idempotent writes.** Re-running any producer is safe.
 - **Raw first** (ingestion producers): save the response before parsing. Parsing can be replayed.
 
+## Engine
+SQLite, WAL mode, one file (`data/finagent.db`), stdlib `sqlite3`.
+- Readers never block and are never blocked. Writers are serialized; a second writer waits `wait` seconds, then fails.
+- Autocommit. `upsert` runs its batch in one transaction.
+- No date types: dates and timestamps are ISO-8601 text, in and out. Compare and sort as text.
+- Schema and views are reapplied on connect only when their text changed (hash in `PRAGMA user_version`).
+
 ## Domains
 
 | Domain | Tables | Producer | Status |
@@ -47,11 +54,10 @@ src/finagent/
 ## Consumer API
 Not designed yet. FinAgent agents will consume it. Constraints known today:
 - Agents read reference, fundamentals and market data, and write agent runs and outputs.
-- Agents run concurrently. The store must allow reads while a producer writes.
+- Agents run concurrently. WAL allows reads while a producer writes.
 - Agents must not depend on table layout. They call query functions only.
 
 ## Open Questions
-- **Engine:** DuckDB allows one process at a time, so a scheduled recon run blocks every reader. The prior session planned SQLite in WAL mode (concurrent readers, one writer); no code exists for it yet. Decide before adding consumers.
-- **Migrations:** `schema.sql` is `CREATE IF NOT EXISTS` only. Column changes need versioned migrations.
+- **Migrations:** `schema.sql` is `CREATE IF NOT EXISTS` only. Column changes need versioned migrations (`PRAGMA user_version` is taken by the schema hash today).
 - **Distribution:** how FinAgent depends on this package (editable path install, git dependency, or a service).
 - **Watchlist:** stays a file, or moves into the Curation tables.

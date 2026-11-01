@@ -14,7 +14,7 @@ BODY = (Path(__file__).parent / "fixtures" / "company_tickers_exchange.json").re
 @pytest.fixture(autouse=True)
 def env(monkeypatch, tmp_path):
     monkeypatch.setenv("FINAGENT_SEC_USER_AGENT", "FinAgent me@corp.com")
-    monkeypatch.setenv("FINAGENT_DB_PATH", str(tmp_path / "t.duckdb"))
+    monkeypatch.setenv("FINAGENT_DB_PATH", str(tmp_path / "t.db"))
     monkeypatch.setenv("FINAGENT_RAW_DIR", str(tmp_path / "raw"))
     monkeypatch.chdir(tmp_path)  # keep a stray .env out of the way
 
@@ -30,7 +30,7 @@ def fake_client(seen=None):
 
 def test_run_loads_companies_and_returns_zero(tmp_path):
     assert main(["run", "sec_tickers"], client=fake_client()) == 0
-    con = connect(tmp_path / "t.duckdb")
+    con = connect(tmp_path / "t.db")
     assert con.execute("SELECT count(*) FROM companies").fetchone()[0] == 4
     assert con.execute("SELECT count(*) FROM tickers").fetchone()[0] == 5
     con.close()
@@ -103,7 +103,7 @@ def watchlist(monkeypatch, tmp_path):
 
 
 def counts(tmp_path):
-    con = connect(tmp_path / "t.duckdb")
+    con = connect(tmp_path / "t.db")
     out = {t: con.execute(f"SELECT count(*) FROM {t}").fetchone()[0] for t in ("filings", "facts")}
     out["sic"] = con.execute("SELECT sic FROM companies WHERE cik = '0000320193'").fetchone()[0]
     con.close()
@@ -132,7 +132,7 @@ def test_missing_watchlist_fails_cleanly(monkeypatch, tmp_path, capsys):
 def test_reparse_rebuilds_tables_from_raw_without_network(watchlist, tmp_path, monkeypatch):
     for job in ("sec_tickers", "sec_submissions"):
         assert main(["run", job], client=router_client()) == 0
-    con = connect(tmp_path / "t.duckdb")
+    con = connect(tmp_path / "t.db")
     con.execute("DELETE FROM filings")
     con.close()
 
@@ -200,14 +200,36 @@ def test_run_and_status_report_locked_database_cleanly(monkeypatch, capsys):
     from finagent.data.db import DatabaseLockedError
 
     def locked(path, wait=0):
-        raise DatabaseLockedError(f"database is in use by another process: {path}")
+        raise DatabaseLockedError(f"database is locked by another writer: {path}")
 
     monkeypatch.setattr("finagent.recon.pipeline.connect", locked)
     monkeypatch.setattr("finagent.recon.cli.connect", locked)
     assert main(["run", "sec_tickers"], client=fake_client()) == 1
     assert main(["status"]) == 1
     out = capsys.readouterr().out
-    assert out.count("in use by another process") == 2
+    assert out.count("locked by another writer") == 2
+
+
+def test_run_reports_clean_failure_when_another_writer_holds_the_lock(tmp_path, capsys):
+    holder = connect(tmp_path / "t.db")
+    holder.execute("BEGIN IMMEDIATE")
+    try:
+        assert main(["run", "sec_tickers"], client=fake_client()) == 1
+    finally:
+        holder.rollback()
+        holder.close()
+    assert "sec_tickers: failed: database is locked by another writer" in capsys.readouterr().out
+
+
+def test_status_works_while_another_writer_holds_the_lock(tmp_path, capsys):
+    holder = connect(tmp_path / "t.db")
+    holder.execute("BEGIN IMMEDIATE")
+    try:
+        assert main(["status"]) == 0
+    finally:
+        holder.rollback()
+        holder.close()
+    assert "No runs yet." in capsys.readouterr().out
 
 
 def test_status_keeps_columns_separated_for_long_job_names(capsys):
@@ -215,7 +237,7 @@ def test_status_keeps_columns_separated_for_long_job_names(capsys):
     con = connect(Path(__import__("os").environ["FINAGENT_DB_PATH"]))
     con.execute(
         "INSERT INTO ingest_runs (run_id, job, started_at, status, requests, rows_written, errors) "
-        "VALUES ('r', 'sec_companyfacts:reparse', now(), 'ok', 1, 1, 0)"
+        "VALUES ('r', 'sec_companyfacts:reparse', datetime('now'), 'ok', 1, 1, 0)"
     )
     con.close()
     capsys.readouterr()
@@ -238,7 +260,7 @@ def frames_client():
 def test_sec_frames_loads_public_float_and_tolerates_missing_quarters(tmp_path, capsys):
     assert main(["run", "sec_frames"], client=frames_client()) == 0
     assert "sec_frames: ok" in capsys.readouterr().out
-    con = connect(tmp_path / "t.duckdb")
+    con = connect(tmp_path / "t.db")
     assert con.execute("SELECT count(*) FROM public_float").fetchone()[0] == 3
     con.close()
 
@@ -255,7 +277,7 @@ def test_small_cap_candidates_end_to_end(tmp_path):
     )
     assert main(["run", "sec_tickers"], client=router_client()) == 0
     assert main(["run", "sec_frames"], client=client) == 0
-    con = connect(tmp_path / "t.duckdb")
+    con = connect(tmp_path / "t.db")
     got = con.execute(
         "SELECT ticker, exchange, public_float FROM v_small_cap_candidates"
     ).fetchall()

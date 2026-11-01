@@ -23,14 +23,14 @@ def _status(settings: Settings) -> int:
         return 1
     try:
         runs = con.execute(
-            "SELECT job, status, started_at, requests, rows_written, errors FROM ingest_runs "
-            "QUALIFY row_number() OVER (PARTITION BY job ORDER BY started_at DESC) = 1 "
-            "ORDER BY job"
+            "SELECT job, status, started_at, requests, rows_written, errors FROM ("
+            "  SELECT *, row_number() OVER (PARTITION BY job ORDER BY started_at DESC) AS rn "
+            "  FROM ingest_runs) WHERE rn = 1 ORDER BY job"
         ).fetchall()
         if runs:
             print(f"{'job':<26}{'status':<9}{'started (UTC)':<21}{'req':>5}{'rows':>8}{'err':>5}")
             for job, status, started, req, rows, err in runs:
-                when = f"{started:%Y-%m-%d %H:%M:%S}"
+                when = started[:19]  # ISO text: YYYY-MM-DD HH:MM:SS
                 print(f"{job:<26}{status:<9}{when:<21}{req or 0:>5}{rows or 0:>8}{err or 0:>5}")
         else:
             print("No runs yet.")

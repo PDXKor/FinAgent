@@ -10,10 +10,10 @@ pytestmark = pytest.mark.unit
 
 def test_reads_finagent_prefixed_env(monkeypatch):
     monkeypatch.setenv("FINAGENT_SEC_USER_AGENT", "FinAgent me@corp.com")
-    monkeypatch.setenv("FINAGENT_DB_PATH", "x/y.duckdb")
+    monkeypatch.setenv("FINAGENT_DB_PATH", "x/y.db")
     s = Settings(_env_file=None)
     assert s.sec_user_agent == "FinAgent me@corp.com"
-    assert s.db_path == Path("x/y.duckdb")
+    assert s.db_path == Path("x/y.db")
     assert s.raw_dir == Path("data/raw")
 
 

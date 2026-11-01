@@ -1,15 +1,15 @@
 # Recon — Data Model
 
-What is stored, where it comes from, and what it means. Row counts are a snapshot from 2026-10-31 (12-ticker watchlist). Schema source of truth: [`store/schema.sql`](../store/schema.sql), [`store/views.sql`](../store/views.sql).
+What is stored, where it comes from, and what it means. Row counts are a snapshot from 2026-10-31 (12-ticker watchlist). Schema source of truth: [`data/schema.sql`](../../data/schema.sql), [`data/views.sql`](../../data/views.sql).
 
 ## Files (`data/`, gitignored)
 
 | Path | What | Size | Regenerable |
 |---|---|---|---|
-| `finagent.duckdb` | Parsed tables and views | 7.8 MB | Yes, from raw via `recon reparse` |
+| `finagent.db` | Parsed tables and views (SQLite, WAL: also `-wal`, `-shm` while open) | 5.9 MB | Yes, from raw via `recon reparse` |
 | `raw/` | Unmodified SEC responses, one file per fetch | 44 MB | Yes, by refetching |
 | `slice.txt` | Watchlist: one ticker per line, `#` comments | 113 B | No, hand-edited |
-| `finagent.v2-backup.duckdb` | Pre-downgrade copy (DuckDB 2.0 format) | 3.3 MB | Obsolete; safe to delete |
+| `finagent.duckdb`, `finagent.v2-backup.duckdb` | Pre-SQLite DuckDB files | 8.1 MB, 3.3 MB | Obsolete; safe to delete |
 
 Paths set by `FINAGENT_DB_PATH`, `FINAGENT_RAW_DIR`, `FINAGENT_SLICE_FILE`.
 
@@ -211,7 +211,7 @@ SOUN
 ## Conventions
 
 - `cik`: text, zero-padded to 10 digits. Never an integer.
-- Dates: `DATE` from SEC as-is. Timestamps: naive UTC.
+- Dates: ISO text (`YYYY-MM-DD`) from SEC as-is. Timestamps: naive UTC, ISO text (`YYYY-MM-DD HH:MM:SS`). SQLite has no date type: query results are strings; compare and sort as text, use `date()`/`julianday()` for arithmetic.
 - Money: full units, floating point (`DOUBLE`). Fine for analysis, not for accounting.
 - Writes are upserts on the table key; reruns never duplicate rows.
 - Columns a job doesn't supply are left untouched on update (enrichment survives a ticker refresh).
@@ -231,13 +231,13 @@ SOUN
 SELECT period_end, value FROM facts
 WHERE cik = (SELECT cik FROM tickers WHERE ticker = 'PLUG')
   AND concept LIKE 'Revenue%' AND form LIKE '10-K%'
-  AND date_diff('day', period_start, period_end) BETWEEN 350 AND 380
+  AND julianday(period_end) - julianday(period_start) BETWEEN 350 AND 380
 ORDER BY period_end DESC, filed_date DESC;
 
 -- Insider activity (Form 4) in the last 90 days
 SELECT t.ticker, count(*) AS form4s
 FROM filings f JOIN tickers t USING (cik)
-WHERE f.form = '4' AND f.filed_date >= current_date - INTERVAL 90 DAY
+WHERE f.form = '4' AND f.filed_date >= date('now', '-90 day')
 GROUP BY 1 ORDER BY 2 DESC;
 
 -- Exchange mix of the universe

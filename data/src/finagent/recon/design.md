@@ -7,11 +7,11 @@ Gather raw data on small-cap companies from free sources into a local store. Out
 | Doc | Covers |
 |---|---|
 | [design/data-sources.md](design/data-sources.md) | Candidate free APIs and scrape targets |
-| [design/ingestion.md](design/ingestion.md) | v0 pipeline: SEC EDGAR → DuckDB, job runner, scheduling, schema, milestones |
+| [design/ingestion.md](design/ingestion.md) | v0 pipeline: SEC EDGAR → SQLite, job runner, scheduling, schema, milestones |
 | [design/data-model.md](design/data-model.md) | What is stored: files, tables, columns, sources, views, gotchas, live row counts |
 
 ## Decisions
-- **Store:** DuckDB, single local file (`data/finagent.duckdb`).
+- **Store:** SQLite (WAL), single local file (`data/finagent.db`).
 - **First source:** SEC EDGAR (free, no key, authoritative).
 - **Orchestration:** manual CLI first, then APScheduler, then Prefect/Dagster if needed.
 - **Raw first:** save every response to disk before parsing; parsing can be replayed.

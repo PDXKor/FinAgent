@@ -91,7 +91,7 @@ def _guarded(run: Callable[[str], object], name: str) -> None:
 def build_scheduler(
     schedule: dict[str, str], timezone: str, run: Callable[[str], object]
 ) -> BlockingScheduler:
-    # One worker: jobs run serially, so DuckDB has a single writer and dependents wait for inputs.
+    # One worker: jobs run serially, so SQLite has a single writer and dependents wait for inputs.
     sched = BlockingScheduler(executors={"default": ThreadPoolExecutor(1)}, timezone=timezone)
     for name, cron in schedule.items():
         sched.add_job(

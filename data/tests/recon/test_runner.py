@@ -32,7 +32,7 @@ class FakeJob:
 
 class Env:
     def __init__(self, tmp_path, handler):
-        self.con = connect(tmp_path / "t.duckdb")
+        self.con = connect(tmp_path / "t.db")
         self.sleeps = []
         self.client = httpx.Client(transport=httpx.MockTransport(handler))
         self.runner = Runner(

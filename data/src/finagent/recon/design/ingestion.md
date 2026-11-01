@@ -1,6 +1,6 @@
 # Recon — Ingestion v0
 
-Goal: pull basic company data from **one source (SEC EDGAR)** into **DuckDB** on a schedule, and browse it locally. Small first, extend later.
+Goal: pull basic company data from **one source (SEC EDGAR)** into **SQLite** on a schedule, and browse it locally. Small first, extend later.
 
 ## Why SEC EDGAR First
 - Free, no key, authoritative.
@@ -21,7 +21,7 @@ jobs.yaml ──► Scheduler ──► Runner ──► Job.plan()  ──► R
                               │                          │
                               │                     Job.parse()
                               │                          │
-                              └──► ingest_runs    DuckDB upsert
+                              └──► ingest_runs    SQLite upsert
 ```
 
 Principles:
@@ -29,7 +29,7 @@ Principles:
 - **Idempotent.** Every write is an upsert on a natural key. Re-running a job is safe.
 - **Incremental.** Jobs skip work already done using `source_state` and existing rows.
 - **Observable.** Every run logged to `ingest_runs`.
-- **Single writer.** DuckDB allows one write process. Scheduler and jobs run in one process.
+- **Single writer.** SQLite serializes writers (readers are unaffected in WAL mode). Scheduler and jobs run in one process.
 
 ## First Jobs
 
@@ -44,7 +44,7 @@ Dependency: `sec_tickers` → `sec_submissions` → `sec_companyfacts`. Each job
 
 **Watchlist:** `data/slice.txt` (`FINAGENT_SLICE_FILE`), one ticker per line, `#` comments allowed. Unknown tickers are logged and skipped; share classes collapse to one CIK. Run `sec_tickers` first. Expands to a market-cap-filtered universe in M3.
 
-## Schema (DuckDB)
+## Schema (SQLite)
 
 ```sql
 -- Reference
@@ -169,7 +169,7 @@ jobs:
 ```
 
 Scheduler rules:
-- **One worker.** Jobs run serially: single DuckDB writer, and dependents wait for inputs. Space cron times so a job finishes before the next starts.
+- **One worker.** Jobs run serially: single SQLite writer, and dependents wait for inputs. Space cron times so a job finishes before the next starts.
 - **No overlap, coalesced.** `max_instances=1`; missed runs collapse to one. A run missed by under 1h (e.g. laptop asleep) still fires.
 - **Failures don't stop it.** A failed or non-zero run is logged; the next schedule still fires.
 - **Weekdays use standard cron numbering** (0/7 = Sunday). APScheduler's own numbering differs, so the weekday field is translated.
@@ -179,18 +179,19 @@ Scheduler rules:
 `recon reparse <job>` rebuilds a job's tables from the newest saved raw response per key, with no network. Logged as `<job>:reparse`; leaves `source_state` alone. Use after changing a parser or the tracked concept list.
 
 ### Database lock
-DuckDB allows one process on the file. A DuckDB shell or UI left open blocks writes.
-- `recon run` / `status` / `reparse`: fail at once with `database is in use by another process`.
-- Scheduled runs retry every 5s for up to 5 minutes, then fail and wait for the next schedule.
-- Open the shell with `duckdb -readonly` for quick looks, and close it when done.
+WAL mode: any number of readers (`recon status`, shells, agents) run alongside one writer. Only a second writer conflicts.
+- `recon run` / `reparse`: fail at once with `database is locked by another writer`.
+- Scheduled runs wait up to 5 minutes for the lock, then fail and wait for the next schedule.
+- `recon status` and ad-hoc queries never wait. Leave no write transaction open in a shell.
 
 ### Raw store
 `data/raw/<source>/<job>/<key>/<YYYYMMDDTHHMMSS>.json` (`FINAGENT_RAW_DIR`). Gitignored. Enables replay: `recon reparse <job>`.
 
 ## Viewing Data
-- **DuckDB UI:** `duckdb data/finagent.duckdb -ui` → browser SQL notebook.
+- **Shell:** `python -m sqlite3 data/finagent.db` (no install; autocommit).
+- **GUI:** [DB Browser for SQLite](https://sqlitebrowser.org). Use *Open Database Read Only* so it never holds the write lock.
 - **CLI:** `recon status` — last run per job, row counts per table.
-- **Views** (`store/views.sql`, rebuilt on every connect):
+- **Views** (`data/views.sql`, rebuilt on connect when changed):
   - `v_recent_filings` — last 30 days of filings with ticker and name.
   - `v_small_cap_candidates` — latest public float per company, `0 < float ≤ $2B`, with primary ticker, exchange, industry. First-pass universe until prices land (M3).
   - `v_latest_financials` — one row per company: revenue, net income, operating income, assets, liabilities, equity, cash, shares outstanding. Balance-sheet items use the latest period; income items use the latest full-year 10-K value only (no quarter/YTD mixing).
@@ -225,7 +226,7 @@ Built (M0–M2): `cli.py`, `config.py`, `pipeline.py`, `runner.py`, `scheduler.p
 ## Milestones
 | # | Deliverable | Done when |
 |---|---|---|
-| M0 ✅ | Skeleton, schema, `sec_tickers`, `recon run`, `recon status`, `ingest_runs` | `companies` populated; visible in DuckDB UI |
+| M0 ✅ | Skeleton, schema, `sec_tickers`, `recon run`, `recon status`, `ingest_runs` | `companies` populated; visible in a SQLite shell |
 | M1 ✅ | `sec_submissions`, `sec_companyfacts`, views | Watchlist filings + financials queryable |
 | M2b ✅ | `sec_frames`, `public_float`, `v_small_cap_candidates` | Universe-wide small-cap shortlist without prices |
 | M2 ✅ | `recon schedule`, `reparse`, lock handling (incremental fetch for `facts` landed in M1) | Runs unattended for a week, no duplicates — trial pending |

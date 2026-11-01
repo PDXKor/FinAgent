@@ -1,6 +1,8 @@
+import sqlite3
+
 import httpx
 
-from finagent.data.db import DatabaseLockedError, connect
+from finagent.data.db import DatabaseLockedError, connect, is_locked
 from finagent.recon.config import Settings
 from finagent.recon.jobs import REGISTRY
 from finagent.recon.runner import Runner, RunResult
@@ -22,6 +24,13 @@ def _execute(
         res: RunResult = action(Runner(con, client, settings.raw_dir))
     except WatchlistError as e:
         print(f"{label}: failed: {e}", flush=True)
+        return 1
+    except sqlite3.OperationalError as e:
+        if not is_locked(e):
+            raise
+        print(
+            f"{label}: failed: database is locked by another writer: {settings.db_path}", flush=True
+        )
         return 1
     finally:
         con.close()

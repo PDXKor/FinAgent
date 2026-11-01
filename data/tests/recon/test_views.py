@@ -82,7 +82,7 @@ def test_latest_financials_picks_latest_balance_sheet_value(con):
     row = financials(con)
     assert row[:2] == ("AAPL", "Apple Inc.")
     assert row[4] == 120 and row[5] == 15
-    assert row[6] == date(2024, 6, 29)
+    assert row[6] == "2024-06-29"
 
 
 def test_latest_financials_uses_only_full_year_flow_values(con):
@@ -92,7 +92,7 @@ def test_latest_financials_uses_only_full_year_flow_values(con):
     add_fact(con, "NetIncomeLoss", 79, "2024-06-29", start="2023-10-01", fp="Q3", form="10-Q")
     row = financials(con)
     assert row[3] == 90
-    assert row[7] == date(2024, 9, 28)
+    assert row[7] == "2024-09-28"
 
 
 def test_latest_financials_merges_both_revenue_concepts(con):
@@ -153,14 +153,14 @@ def test_small_cap_candidates_keep_only_floats_up_to_two_billion(con):
     )
     add_float(con, AAPL, "2025-03-28", 3_000_000_000_000)
     add_float(con, "0001318605", "2025-06-30", 2_000_000_000)  # boundary is inclusive
-    assert candidates(con) == [("TSLA", "Tesla", "Nasdaq", 2_000_000_000, date(2025, 6, 30))]
+    assert candidates(con) == [("TSLA", "Tesla", "Nasdaq", 2_000_000_000, "2025-06-30")]
 
 
 def test_small_cap_candidates_use_each_companys_latest_float(con):
     upsert(con, "companies", [{"cik": AAPL, "name": "Apple"}], ["cik"])
     add_float(con, AAPL, "2024-03-28", 500)
     add_float(con, AAPL, "2025-03-28", 900)
-    assert candidates(con) == [("AAPL", "Apple", "Nasdaq", 900, date(2025, 3, 28))]
+    assert candidates(con) == [("AAPL", "Apple", "Nasdaq", 900, "2025-03-28")]
 
 
 def test_small_cap_candidates_exclude_zero_float(con):

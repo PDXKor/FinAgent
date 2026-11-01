@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="FINAGENT_", env_file=".env", extra="ignore")
 
     sec_user_agent: str  # SEC requires a contact email
-    db_path: Path = Path("data/finagent.duckdb")
+    db_path: Path = Path("data/finagent.db")
     raw_dir: Path = Path("data/raw")
     slice_file: Path = Path("data/slice.txt")
     schedule_timezone: str = "UTC"
