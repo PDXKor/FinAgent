@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "finagent-data"
+version = "0.1.0"
+description = "FinAgent data layer: shared store and ingestion."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2",
+    "pydantic-settings>=2",
+    "apscheduler>=3.10,<4",
+    "duckdb>=1.5,<2",
+    "pandas>=2.2",
+    "httpx>=0.27",
+    "pyyaml>=6",
+    "tzdata>=2024.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
+[project.scripts]
+recon = "finagent.recon.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/finagent"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--import-mode=importlib"
+markers = ["unit: pure, no DB/network", "component: temp DB + fakes", "contract: real vs fake"]
+
+[tool.ruff]
+line-length = 100

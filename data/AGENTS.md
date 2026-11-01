@@ -1,0 +1,1 @@
+Everything you write in markdown should be concise, limit over verbose language, reduce word count and make it straight and too the point. Think like an architect who is very straightforward.
