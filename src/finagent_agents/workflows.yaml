@@ -1,0 +1,27 @@
+defaults:
+  model: claude-opus-5-5
+  effort: medium
+  timeout_s: 120
+  max_concurrency: 4
+
+workflows:
+  ping:                         # smoke test, no tools
+    graph: single
+    input: { text: str }
+    nodes:
+      agent: { prompt: ping@1 }
+
+  company_brief:
+    graph: react
+    input: { ticker: str }
+    nodes:
+      agent: { prompt: company_brief@1, tools: [get_company, get_financials] }
+    schedule: null              # cron later, same as jobs.yaml
+
+  screen_then_brief:            # two agents: screener per ticker, then one writer
+    graph: screen_then_brief
+    input: { tickers: "list[str]" }
+    timeout_s: 300
+    nodes:
+      screener: { model: claude-haiku-5-5, effort: low, prompt: screener@1, tools: [get_financials] }
+      writer:   { prompt: brief_writer@1, tools: [get_company] }
