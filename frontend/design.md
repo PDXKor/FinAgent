@@ -36,7 +36,7 @@ Rules:
 | Markdown | react-markdown, no raw HTML | Briefs are LLM output; never render HTML from it |
 | API types | openapi-typescript + openapi-fetch | Generated, thin client |
 | Tests | Vitest + Testing Library + MSW; Playwright e2e | Fake both APIs in unit tests |
-| Prod proxy | Caddy | One file, serves `dist/` and proxies |
+| Prod proxy | Caddy (`frontend/Caddyfile`, in the frontend image) | One file, serves `dist/` and proxies |
 
 Prerequisite: Node LTS (v26; per-user install in `%LOCALAPPDATA%\Programs\nodejs`). Dependencies installed with `npm install --before=<date ≥ 2 weeks ago>`.
 
@@ -88,7 +88,7 @@ Input form: map workflow input types to controls — `str` text, `int`/`float` n
 ## Live Runs
 1. `POST /api/agents/v1/workflows/{name}/runs` → `202 {run_id}`. Run record already saved as `running` in FinAgentData.
 2. Navigate to `/runs/{run_id}`. Open `EventSource /api/agents/v1/runs/{run_id}/events`.
-3. Events: `node_start`, `node_end`, `tool_call`, `tool_result`, `token`, `done`. Timeline shows nodes and tool calls; streams output text.
+3. Events: `run_start`, `node_*`, `llm_*`, `tool_*`, `done`, each with `span`/`parent` for a tree (agents design, Server). Timeline shows nodes, model calls and tool calls. Token streaming: deferred.
 4. On `done`, close stream; refetch the run from FinAgentData (source of truth).
 5. Stream unavailable (agents server restarted, run finished long ago) → fall back to polling the data run every 3s until terminal status.
 
@@ -109,13 +109,13 @@ Input form: map workflow input types to controls — `str` text, `int`/`float` n
 
 | # | Change | Why |
 |---|---|---|
-| D1 | `GET /v1/agent-runs?workflow=&status=&ticker=&before=&limit=` → `{items, next}`, newest first. Ticker matches `$.ticker` or any of `$.tickers` via `json_extract`/`json_each`. Index `agent_runs(started_at)`, `(workflow, started_at)`. | Runs page, company briefs, dashboard |
+| D1 | **Partly done.** `GET /v1/agent-runs?workflow=&status=&before=&limit=` → `{items, next}`, index on `started_at`. Still to add: `ticker` filter (`$.ticker` or any of `$.tickers`). | Runs page, company briefs, dashboard |
 | D2 | `GET /v1/companies?q=&limit=` — ticker/name prefix search | Typeahead |
 | D3 | `GET /v1/screens/small-caps?min_float=&max_float=&exchange=&sic=&location=&limit=&offset=` over `v_small_cap_candidates` | Screener |
 | D4 | `GET /v1/companies/{ticker}/filings?form=&limit=` over `v_recent_filings` | Company page |
 | D5 | **Done.** `queries/ops.py` (latest run per job, run list, table counts); `recon status` reuses it. | Ingestion page; removes SQL from CLI |
 | D6 | **Done.** Timestamps were sent without offset (browsers read them as local). `UtcDatetime` schema type now sends `Z`. | Correct times in UI |
-| D7 | Add `cancelled` to `AgentRunIn.status`. | Cancel support (A3) |
+| D7 | **Done.** `cancelled` status. | Cancel support (A3) |
 | D8 | Watchlist moves to Curation: table `watchlist(ticker PK, added_at, note)`; `GET/PUT/DELETE /v1/watchlist[/{ticker}]`. Recon reads the table; `slice.txt` imported once. | Edit from UI; closes design open question |
 | D9 | **Done.** Operation ids = route names. | Clean generated client names |
 | D10 | **Done.** Work committed; merged into the monorepo with history. | UI depends on it |
@@ -129,12 +129,12 @@ List endpoints use `{items, next}`; existing bare-list endpoints stay as-is in `
 
 | # | Change | Why |
 |---|---|---|
-| A1 | `finagent-agents serve` (FastAPI + uvicorn, `:8766`). Lifespan owns one `HttpDataLayer` and one `Runner`. Endpoints: `GET /v1/health`, `GET /v1/workflows`, `POST /v1/workflows/{name}/runs` (422 on bad input), `GET /v1/runs/{id}/events` (SSE), `POST /v1/runs/{id}/cancel`. Bearer token via `FINAGENT_AGENTS_API_TOKEN`. | UI has no way to start runs today (CLI only) |
-| A2 | `Runner.start(name, inputs) -> run_id`: validate, save `running`, spawn task, return. Keep `run`/`run_many` for CLI. Track tasks by `run_id`. | Non-blocking start |
-| A3 | Cancel: `task.cancel()` → status `cancelled`, `finished_at` set, saved. Add `cancelled` to `RunRecord.status`. | Stop runaway or costly runs |
-| A4 | Events: run graph with `astream_events` (or `astream` with `updates` + `messages`) instead of `ainvoke`; publish to a per-run in-memory broadcaster; SSE subscribers read it. Usage counting unchanged. Not persisted (deferred). | Live timeline |
-| A5 | `Workflow.describe()` exposes `input` types, `timeout_s`, `max_concurrency`, `schedule` — not just node bindings. | Catalog + generated forms |
-| A6 | On server start, mark stale `running` runs (from D1 `status=running`) as `failed: interrupted`. Single agents process assumed. | No zombie "running" rows after restart |
+| A1 | **Done.** `finagent-agents serve` (`:8766`): health, workflows, start (`202`), SSE events, cancel. Bearer `FINAGENT_AGENTS_API_TOKEN`. | Start runs from the UI |
+| A2 | **Done.** `Runner.start` → running record; background task tracked by `run_id`. | Non-blocking start |
+| A3 | **Done.** Cancel → `cancelled`, `finished_at`, saved; shutdown cancels in-flight runs. | Stop runaway or costly runs |
+| A4 | **Done.** Callback-based events (graph still runs with `ainvoke`) into a per-run replayable stream; SSE with `Last-Event-ID`. Not persisted. | Live timeline |
+| A5 | **Done.** `/v1/workflows` returns input types, bindings, timeout, concurrency, schedule. | Catalog + generated forms |
+| A6 | **Done.** Startup marks stale `running` runs `failed: interrupted`. | No zombie rows |
 | A7 | `python-dotenv` added (**done**). Add `fastapi`, `uvicorn`, `sse-starlette` with A1. | Clean install |
 | A8 | **Done.** Duplicated data/recon removed, stale Dockerfile dropped, `.env.example` trimmed, agents moved to `agents/`. Root README covers the monorepo. | Repo matches the split |
 
@@ -146,9 +146,9 @@ List endpoints use `{items, next}`; existing bare-list endpoints stay as-is in `
 | F0.5 | **Done.** Ingestion page: run recon jobs, status, history, counts | D5, D6, D11 |
 | F1 | Router, company page, screener, typeahead (read-only) | D2, D3, D4 |
 | F2 | Runs list + detail (history, no live) | D1 |
-| F3 | Workflow catalog, generated forms, start run, live timeline, cancel | A1–A7, D7 |
+| F3 | Workflow catalog, generated forms, start run, live timeline, cancel (backend ready) | A1–A6, D7 (done) |
 | F4 | Watchlist editing, ingest progress | D8, D12, D13 |
-| F5 | Caddy prod config, Playwright e2e, empty/error states | — |
+| F5 | Containers + Caddy (**done**: `compose.yaml`); Playwright e2e, empty/error states | — |
 
 ## Test Plan
 - **Unit/component (Vitest + MSW):** formatters, input-form mapping per type, run status rendering, query hooks against MSW handlers built from generated types.
@@ -166,4 +166,4 @@ List endpoints use `{items, next}`; existing bare-list endpoints stay as-is in `
 
 ## Open Questions
 - One proxy process, or let FinAgent API also proxy data reads? Recommendation: separate proxy; keeps backends independent.
-- Deploy target beyond localhost (VM + Caddy vs. containers for all three).
+- Deploy target beyond localhost: compose runs locally today; same images on a VM (add auth before exposing beyond localhost).

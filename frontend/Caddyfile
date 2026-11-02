@@ -1,0 +1,27 @@
+# Production server: static SPA + same-origin proxy. Tokens are added here, never in the browser.
+{
+	admin off
+}
+
+:8080 {
+	encode zstd gzip
+
+	handle_path /api/data/* {
+		reverse_proxy {$FINAGENT_DATA_URL:data:8765} {
+			header_up Authorization "Bearer {$FINAGENT_DATA_TOKEN}"
+		}
+	}
+
+	# Includes SSE (/v1/runs/{id}/events); Caddy flushes text/event-stream immediately.
+	handle_path /api/agents/* {
+		reverse_proxy {$FINAGENT_AGENTS_URL:agents:8766} {
+			header_up Authorization "Bearer {$FINAGENT_AGENTS_TOKEN}"
+		}
+	}
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

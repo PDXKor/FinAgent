@@ -1,0 +1,59 @@
+# docker compose up --build -d     UI at http://localhost:8080
+# docker compose run --rm agents run company_brief -i ticker=SOUN   (one-off CLI run)
+name: finagent
+
+x-token: &token ${FINAGENT_API_TOKEN:-}   # shared bearer token from ./.env; blank = no auth
+
+services:
+  data:
+    build: ./data
+    env_file:
+      - path: data/.env                  # FINAGENT_SEC_USER_AGENT etc.
+        required: false
+    environment:                         # override any host paths/hosts in data/.env
+      FINAGENT_DB_PATH: /data/finagent.db
+      FINAGENT_RAW_DIR: /data/raw
+      FINAGENT_SLICE_FILE: /data/slice.txt
+      FINAGENT_API_HOST: 0.0.0.0
+      FINAGENT_API_TOKEN: *token
+    volumes:
+      - finagent-data:/data              # named volume: SQLite WAL needs a Linux filesystem
+    ports:
+      - "127.0.0.1:8765:8765"            # host access for local tools; remove to keep internal
+    restart: unless-stopped
+
+  agents:
+    build: ./agents
+    env_file:
+      - path: agents/.env                # ANTHROPIC_API_KEY etc.
+        required: false
+    environment:
+      FINAGENT_AGENTS_DATA_URL: http://data:8765
+      FINAGENT_AGENTS_DATA_TOKEN: *token
+      FINAGENT_AGENTS_API_HOST: 0.0.0.0
+      FINAGENT_AGENTS_API_TOKEN: *token
+    ports:
+      - "127.0.0.1:8766:8766"
+    depends_on:
+      data:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    environment:
+      FINAGENT_DATA_URL: http://data:8765
+      FINAGENT_DATA_TOKEN: *token
+      FINAGENT_AGENTS_URL: http://agents:8766
+      FINAGENT_AGENTS_TOKEN: *token
+    ports:
+      - "127.0.0.1:${FINAGENT_WEB_PORT:-8080}:8080"
+    depends_on:
+      data:
+        condition: service_healthy
+      agents:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  finagent-data:

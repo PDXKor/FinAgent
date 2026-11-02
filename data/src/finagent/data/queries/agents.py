@@ -27,11 +27,37 @@ def save_agent_run(con: sqlite3.Connection, run: dict) -> None:
     upsert(con, "agent_runs", [row], ["run_id"])
 
 
+def _decode(run: dict) -> dict:
+    for k in JSON_COLUMNS:
+        run[k] = json.loads(run[k]) if run[k] is not None else None
+    return run
+
+
 def get_agent_run(con: sqlite3.Connection, run_id: str) -> dict | None:
     found = rows(con.execute("SELECT * FROM agent_runs WHERE run_id = ?", [run_id]))
     if not found:
         return None
-    run = found[0]
-    for k in JSON_COLUMNS:
-        run[k] = json.loads(run[k]) if run[k] is not None else None
-    return run
+    return _decode(found[0])
+
+
+def list_agent_runs(
+    con: sqlite3.Connection,
+    workflow: str | None = None,
+    status: str | None = None,
+    before: datetime | None = None,
+    limit: int = 50,
+) -> list[dict]:
+    """Newest first. `before` (exclusive) pages by started_at."""
+    where, params = [], []
+    for col, val in (("workflow", workflow), ("status", status)):
+        if val is not None:
+            where.append(f"{col} = ?")
+            params.append(val)
+    if before is not None:
+        where.append("started_at < ?")
+        params.append(_naive_utc(before))
+    sql = "SELECT * FROM agent_runs"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY started_at DESC LIMIT ?"
+    return [_decode(r) for r in rows(con.execute(sql, [*params, limit]))]

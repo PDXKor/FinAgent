@@ -27,7 +27,9 @@ src/finagent_agents/
   context.py         # GraphContext handed to graph builders
   runner.py          # async executor: concurrency, timeouts, run log
   data.py            # DataLayer protocol, RunRecord, HttpDataLayer, MemoryDataLayer
-  cli.py             # finagent-agents list | run | run-many
+  cli.py             # finagent-agents list | run | run-many | serve
+  server.py          # FastAPI: workflows, start, SSE events, cancel
+  events.py          # EventHub (per-run replayable streams), EventPublisher callback
   workflows.yaml
   prompts/
     ping.v1.md  company_brief.v1.md  screener.v1.md  brief_writer.v1.md
@@ -167,12 +169,31 @@ tools / Runner ─► DataLayer ─► HttpDataLayer ──HTTP /v1──► fin
 - `get_financials` returns annual rows (one per fiscal year, newest first).
 - New tool needing new data → `data/` adds query + endpoint first, then a `DataLayer` method here.
 
+## Server
+`finagent-agents serve` (FastAPI, `:8766`, `server.py`). Serves live state only; history is read from the data API (`GET /v1/agent-runs`).
+
+| Method | Path | Does |
+|---|---|---|
+| GET | `/v1/health` | `{status, active_runs}` |
+| GET | `/v1/workflows` | Catalog: graph, input types, node bindings, timeout, schedule |
+| POST | `/v1/workflows/{name}/runs` | `{inputs}` → `202 {run_id, status, started_at}`; `404` unknown, `422` bad input |
+| GET | `/v1/runs/{run_id}/events` | SSE, replayed from the start (or after `Last-Event-ID`), ends with `done`. `404` once evicted |
+| POST | `/v1/runs/{run_id}/cancel` | `202`; the run saves itself `cancelled`. `404` if not running here |
+
+- `Runner.start` saves the run `running`, then executes it as a background task. `run`/`run_many` (CLI) are unchanged.
+- **Events** (`events.py`): a LangChain callback publishes `run_start`, `node_start|end|error`, `llm_start|end|error` (model, tokens), `tool_start|end|error` (clipped input/output), `done` (status, tokens). Each carries `span` and `parent` (nearest published ancestor), so fan-out branches form separate trees. `__x__` LangGraph nodes are skipped.
+- **Retention:** streams live in memory; the newest `FINAGENT_AGENTS_EVENT_RETENTION` (100) finished runs stay replayable.
+- **Startup:** runs a previous process left `running` are saved `failed: interrupted` (one agents process per data store). **Shutdown:** in-flight runs are cancelled and saved.
+- **Auth:** `FINAGENT_AGENTS_API_TOKEN` (blank = none). Binds `127.0.0.1`; `0.0.0.0` in the container.
+
 ### Deferred
 | Capability | Until then |
 |---|---|
 | Checkpoint persistence | `InMemorySaver`; runs cannot resume after a restart |
 | Human-in-the-loop pause/resume | Not supported (needs a persistent checkpointer) |
 | Prompt storage | Prompt files in this package |
+| Token streaming in events | Node/model/tool events only; needs `streaming=True` and a check that usage still reports |
+| Persisted events | Live only; history keeps final output and tokens |
 
 ## Test Plan
 Existing pytest markers apply. All but the last test use fakes, so CI never calls Claude.
@@ -194,7 +215,8 @@ Fake model: `langchain_core` `GenericFakeChatModel` subclass whose `bind_tools` 
 - **A2:** async runner, limits, timeouts, run log via `DataLayer.save_run`, CLI `run` / `run-many`. Tests 4–5.
 - **A3:** multi-agent `screen_then_brief` with `Send` fan-out over the watchlist.
 - **A4:** schedules via APScheduler (reuse recon scheduler).
-- **A5:** data via FinAgentData HTTP API (done). Next: persistent checkpointer, resume, human-in-the-loop.
+- **A5:** data via FinAgentData HTTP API (done).
+- **A6:** HTTP server: catalog, background runs, SSE events, cancel, interrupted-run cleanup (done). Next: persistent checkpointer, resume, human-in-the-loop.
 
 Setup changes: add `langchain-anthropic` to core dependencies, add `src/finagent_agents` to wheel packages, add an `agents` console script.
 

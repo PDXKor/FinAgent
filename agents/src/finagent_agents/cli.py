@@ -1,4 +1,4 @@
-"""finagent-agents list | run <workflow> --input k=v | run-many <workflow> --inputs-file f.jsonl"""
+"""finagent-agents list | run <workflow> --input k=v | run-many <workflow> --inputs-file f.jsonl | serve"""
 
 import argparse
 import asyncio
@@ -26,6 +26,9 @@ def _parser() -> argparse.ArgumentParser:
     many = sub.add_parser("run-many", help="run a workflow once per JSONL line, concurrently")
     many.add_argument("workflow")
     many.add_argument("--inputs-file", required=True)
+    serve = sub.add_parser("serve", help="run the HTTP API server")
+    serve.add_argument("--host")
+    serve.add_argument("--port", type=int)
     return parser
 
 
@@ -103,6 +106,14 @@ def main(
     workflows = load_workflows(settings.workflows_file, settings.prompts_dir)
     if args.cmd == "list":
         _print_list(workflows)
+        return 0
+    if args.cmd == "serve":
+        import uvicorn
+
+        from finagent_agents.server import create_app
+
+        app = create_app(settings, workflows, data=data, make_llm=make_llm)
+        uvicorn.run(app, host=args.host or settings.api_host, port=args.port or settings.api_port)
         return 0
 
     try:

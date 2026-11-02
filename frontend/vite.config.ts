@@ -19,6 +19,11 @@ export default defineConfig(({ mode }) => {
       env.FINAGENT_DATA_URL || "http://127.0.0.1:8765",
       env.FINAGENT_DATA_TOKEN,
     ),
+    "/api/agents": backend(
+      "/api/agents",
+      env.FINAGENT_AGENTS_URL || "http://127.0.0.1:8766",
+      env.FINAGENT_AGENTS_TOKEN,
+    ),
   };
   return {
     plugins: [react(), tailwindcss()],

@@ -67,6 +67,7 @@ FinAgent / FrontEnd ──HTTP /v1──► finagent.api ──► data.queries 
 | GET | `/v1/companies/{ticker}` | `reference.get_company` (404 if unknown) |
 | GET | `/v1/companies/{ticker}/financials?limit=8` | `fundamentals.get_financials` (limit ≤ 20) |
 | PUT | `/v1/agent-runs/{run_id}` | `agents.save_agent_run` (idempotent upsert) |
+| GET | `/v1/agent-runs?workflow=&status=&before=&limit=50` | `agents.list_agent_runs` → `{items, next}`; page with `before=next` (limit ≤ 200) |
 | GET | `/v1/agent-runs/{run_id}` | `agents.get_agent_run` |
 | GET | `/v1/jobs` | recon `REGISTRY` + `jobs.yaml` + `ops.latest_ingest_runs` |
 | POST | `/v1/jobs/{name}/runs` | starts `recon.pipeline.ingest` in a thread; `202`, `409` if any job runs |
@@ -77,8 +78,8 @@ FinAgent / FrontEnd ──HTTP /v1──► finagent.api ──► data.queries 
 - **Financials:** annual, from `v_annual_financials` (one row per fiscal year, 10-K; latest filing wins; shares from the year's original 10-K cover). Quarterly: later.
 - **Connections:** one per request, opened and closed in the handler (sqlite3 is thread-bound; handlers run in a threadpool).
 - **Writes:** wait `FINAGENT_API_LOCK_WAIT` (5s) for the writer lock, then `503` + `Retry-After`. Client retries.
-- **Auth:** binds `127.0.0.1`. `FINAGENT_API_TOKEN` set → bearer token required.
-- **Run:** `finagent-data serve` (`FINAGENT_API_HOST`, `FINAGENT_API_PORT`, default 8765).
+- **Auth:** binds `127.0.0.1`. `FINAGENT_API_TOKEN` set → bearer token required; blank = no auth (compose passes unset vars as empty).
+- **Run:** `finagent-data serve` (`FINAGENT_API_HOST`, `FINAGENT_API_PORT`, default 8765). Container: `data/Dockerfile`, state in `/data`, binds 0.0.0.0 inside the compose network.
 - **Timestamps:** stored naive UTC; the API sends them with `Z`.
 - **Jobs:** one at a time per API process (`api/jobs.py`); progress and results are `ingest_runs` rows. Waits `FINAGENT_JOB_LOCK_WAIT` (30s) for the writer lock. Needs `FINAGENT_SEC_USER_AGENT`. The API does not run the scheduler; a job killed with the server leaves a `running` row. This makes `api` depend on `recon`.
 - **OpenAPI:** operation ids are route function names (clean generated clients).

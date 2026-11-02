@@ -73,6 +73,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/agent-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Agent Runs
+         * @description Newest first. Page with `before` = the previous page's `next`.
+         */
+        get: operations["agent_runs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/jobs": {
         parameters: {
             query?: never;
@@ -162,7 +182,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "running" | "ok" | "failed" | "timeout";
+            status: "running" | "ok" | "failed" | "timeout" | "cancelled";
             /**
              * Inputs
              * @default {}
@@ -214,7 +234,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "running" | "ok" | "failed" | "timeout";
+            status: "running" | "ok" | "failed" | "timeout" | "cancelled";
             /**
              * Inputs
              * @default {}
@@ -255,6 +275,13 @@ export interface components {
              * @default 0
              */
             cache_read_tokens: number;
+        };
+        /** AgentRunPage */
+        AgentRunPage: {
+            /** Items */
+            items: components["schemas"]["AgentRun"][];
+            /** Next */
+            next?: string | null;
         };
         /** AnnualFinancials */
         AnnualFinancials: {
@@ -538,6 +565,42 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    agent_runs: {
+        parameters: {
+            query?: {
+                workflow?: string | null;
+                status?: ("running" | "ok" | "failed" | "timeout" | "cancelled") | null;
+                before?: string | null;
+                limit?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentRunPage"];
+                };
             };
             /** @description Validation Error */
             422: {

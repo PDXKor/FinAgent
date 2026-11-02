@@ -2,6 +2,8 @@ import secrets
 import sqlite3
 from collections.abc import Callable
 from contextlib import closing
+from datetime import datetime
+from typing import Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
@@ -11,6 +13,7 @@ from finagent.api.jobs import JobBusyError, JobManager
 from finagent.api.schemas import (
     AgentRun,
     AgentRunIn,
+    AgentRunPage,
     AnnualFinancials,
     Company,
     IngestRun,
@@ -18,7 +21,7 @@ from finagent.api.schemas import (
     JobStarted,
 )
 from finagent.data.db import DatabaseLockedError, connect, is_locked
-from finagent.data.queries.agents import get_agent_run, save_agent_run
+from finagent.data.queries.agents import get_agent_run, list_agent_runs, save_agent_run
 from finagent.data.queries.fundamentals import get_financials
 from finagent.data.queries.ops import latest_ingest_runs, list_ingest_runs, table_counts
 from finagent.data.queries.reference import get_company
@@ -27,6 +30,7 @@ from finagent.recon.scheduler import DEFAULT_FILE, ScheduleError, load_schedule
 
 MAX_FINANCIAL_ROWS = 20
 MAX_INGEST_ROWS = 200
+MAX_AGENT_RUN_ROWS = 200
 RETRY_AFTER_S = "1"
 
 
@@ -105,6 +109,19 @@ def create_app(
     def put_agent_run(run_id: str, run: AgentRunIn) -> None:
         with db() as con:
             save_agent_run(con, {"run_id": run_id, **run.model_dump()})
+
+    @app.get(f"{v1}/agent-runs", dependencies=deps)
+    def agent_runs(
+        workflow: str | None = None,
+        status: Literal["running", "ok", "failed", "timeout", "cancelled"] | None = None,
+        before: datetime | None = None,
+        limit: int = Query(50, ge=1, le=MAX_AGENT_RUN_ROWS),
+    ) -> AgentRunPage:
+        """Newest first. Page with `before` = the previous page's `next`."""
+        with db() as con:
+            found = list_agent_runs(con, workflow, status, before, limit)
+        items = [AgentRun(**r) for r in found]
+        return AgentRunPage(items=items, next=items[-1].started_at if len(items) == limit else None)
 
     @app.get(f"{v1}/agent-runs/{{run_id}}", dependencies=deps)
     def agent_run(run_id: str) -> AgentRun:

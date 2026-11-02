@@ -10,6 +10,8 @@ pyyaml>=6
 tzdata>=2024.1
 langchain-anthropic>=1.7
 python-dotenv>=1
+fastapi>=0.115
+uvicorn>=0.30
 
 # dev
 pytest

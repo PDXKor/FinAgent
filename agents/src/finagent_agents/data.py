@@ -18,6 +18,7 @@ import httpx
 BUSY_RETRIES = 3  # retries when the API answers 503 (database busy)
 BUSY_BACKOFF_S = 0.5  # doubled per retry
 CONNECT_RETRIES = 2
+MAX_PAGE = 200  # data API cap on list endpoints
 
 
 @dataclass
@@ -25,7 +26,7 @@ class RunRecord:
     run_id: str
     workflow: str
     inputs: dict
-    status: str  # running | ok | failed | timeout
+    status: str  # running | ok | failed | timeout | cancelled
     started_at: datetime
     finished_at: datetime | None = None
     output: Any = None
@@ -34,6 +35,15 @@ class RunRecord:
     input_tokens: int = 0
     output_tokens: int = 0
     cache_read_tokens: int = 0
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "RunRecord":
+        """From the API's JSON (ISO timestamps)."""
+        fields = {k: v for k, v in d.items() if k in cls.__dataclass_fields__}
+        for k in ("started_at", "finished_at"):
+            if isinstance(fields.get(k), str):
+                fields[k] = datetime.fromisoformat(fields[k])
+        return cls(**fields)
 
 
 class DataLayer(Protocol):
@@ -45,6 +55,10 @@ class DataLayer(Protocol):
 
     async def save_run(self, run: RunRecord) -> None:
         """Insert or replace by run_id."""
+        ...
+
+    async def list_runs(self, status: str | None = None, limit: int = 200) -> list[RunRecord]:
+        """Newest first."""
         ...
 
 
@@ -63,6 +77,10 @@ class MemoryDataLayer:
 
     async def save_run(self, run: RunRecord) -> None:
         self.runs[run.run_id] = copy.deepcopy(run)
+
+    async def list_runs(self, status: str | None = None, limit: int = 200) -> list[RunRecord]:
+        runs = sorted(self.runs.values(), key=lambda r: r.started_at, reverse=True)
+        return [copy.deepcopy(r) for r in runs if status in (None, r.status)][:limit]
 
 
 def _json_default(v: Any) -> str:
@@ -125,3 +143,17 @@ class HttpDataLayer:
         body = json.loads(json.dumps(body, default=_json_default))
         r = await self._request("PUT", f"/agent-runs/{quote(run_id, safe='')}", json=body)
         r.raise_for_status()
+
+    async def list_runs(self, status: str | None = None, limit: int = 200) -> list[RunRecord]:
+        runs: list[RunRecord] = []
+        before = None
+        while len(runs) < limit:
+            params = {"limit": min(MAX_PAGE, limit - len(runs))}
+            params |= {k: v for k, v in (("status", status), ("before", before)) if v}
+            r = await self._request("GET", "/agent-runs", params=params)
+            r.raise_for_status()
+            page = r.json()
+            runs += [RunRecord.from_dict(d) for d in page["items"]]
+            if not (before := page["next"]):
+                break
+        return runs

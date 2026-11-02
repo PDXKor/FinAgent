@@ -102,3 +102,28 @@ def test_token_enforced_when_set(db_path):
     assert c.get("/v1/health").status_code == 401
     assert c.get("/v1/health", headers={"Authorization": "Bearer nope"}).status_code == 401
     assert c.get("/v1/health", headers={"Authorization": "Bearer s3cret"}).status_code == 200
+
+
+def test_blank_token_means_no_auth(db_path, monkeypatch):
+    monkeypatch.setenv("FINAGENT_API_TOKEN", "")
+    c = TestClient(create_app(ApiSettings(db_path=db_path, _env_file=None)))
+    assert c.get("/v1/health").status_code == 200
+
+
+def test_list_agent_runs_filters_and_pages(client):
+    for i, (wf, status) in enumerate(
+        [("ping", "ok"), ("brief", "running"), ("ping", "cancelled"), ("ping", "running")]
+    ):
+        run = {**RUN, "workflow": wf, "status": status, "started_at": f"2026-11-01T12:0{i}:00Z"}
+        assert client.put(f"/v1/agent-runs/r{i}", json=run).status_code == 204
+
+    page = client.get("/v1/agent-runs?limit=3").json()
+    assert [r["run_id"] for r in page["items"]] == ["r3", "r2", "r1"]
+    assert page["next"] == "2026-11-01T12:01:00Z"
+    rest = client.get("/v1/agent-runs", params={"limit": 3, "before": page["next"]}).json()
+    assert [r["run_id"] for r in rest["items"]] == ["r0"] and rest["next"] is None
+
+    running = client.get("/v1/agent-runs?status=running&workflow=ping").json()["items"]
+    assert [r["run_id"] for r in running] == ["r3"]
+    assert running[0]["inputs"] == {"text": "hi"}
+    assert client.get("/v1/agent-runs?status=weird").status_code == 422

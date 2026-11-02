@@ -105,3 +105,27 @@ def test_round_trip_against_running_api():
             return await d.get_financials("ZZZZ-NOT-A-TICKER")
 
     assert asyncio.run(go()) == []
+
+
+@pytest.mark.unit
+def test_list_runs_follows_pages_and_parses_records():
+    def item(i):
+        return {"run_id": f"r{i}", "workflow": "ping", "status": "running", "inputs": {},
+                "output": None, "error": None, "bindings": {}, "input_tokens": 0,
+                "output_tokens": 0, "cache_read_tokens": 0, "finished_at": None,
+                "started_at": f"2026-11-01T12:0{i}:00Z"}  # fmt: skip
+
+    seen = []
+
+    def handler(request):
+        seen.append(dict(request.url.params))
+        if "before" not in request.url.params:
+            page = {"items": [item(2), item(1)], "next": "2026-11-01T12:01:00Z"}
+            return httpx.Response(200, json=page)
+        return httpx.Response(200, json={"items": [item(0)], "next": None})
+
+    runs = run_with(handler, lambda d: d.list_runs(status="running"))
+    assert [r.run_id for r in runs] == ["r2", "r1", "r0"]
+    assert runs[0].started_at == datetime(2026, 11, 1, 12, 2, tzinfo=UTC)
+    assert seen[0] == {"limit": "200", "status": "running"}
+    assert seen[1]["before"] == "2026-11-01T12:01:00Z"
