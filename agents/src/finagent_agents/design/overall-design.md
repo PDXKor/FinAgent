@@ -154,7 +154,7 @@ Builders get every dependency from `ctx` → tests swap in fake LLMs and temp DB
 - Checkpointer: `Runner` takes a `checkpointer` argument, default `InMemorySaver`. Graphs never construct one, so a persistent saver drops in without touching graphs.
 
 ## Storage
-FinAgentData owns storage and serves it over HTTP (`/v1`). This repo imports none of its code; the API is the contract (FinAgentData `src/finagent/data/design.md`, Consumer API).
+The data package (`data/`) owns storage and serves it over HTTP (`/v1`). Agents import none of its code (enforced by ruff `TID251`); the API is the contract (`data/src/finagent/data/design.md`, Consumer API).
 
 ```
 tools / Runner ─► DataLayer ─► HttpDataLayer ──HTTP /v1──► finagent-data serve ─► SQLite
@@ -165,14 +165,14 @@ tools / Runner ─► DataLayer ─► HttpDataLayer ──HTTP /v1──► fin
 - `MemoryDataLayer`: tests and local runs.
 - CLI picks the store: `FINAGENT_AGENTS_DATA_URL` set → HTTP (+ `FINAGENT_AGENTS_DATA_TOKEN`), else memory. It prints which to stderr.
 - `get_financials` returns annual rows (one per fiscal year, newest first).
-- New tool needing new data → FinAgentData adds query + endpoint first, then a `DataLayer` method here.
+- New tool needing new data → `data/` adds query + endpoint first, then a `DataLayer` method here.
 
 ### Deferred
 | Capability | Until then |
 |---|---|
 | Checkpoint persistence | `InMemorySaver`; runs cannot resume after a restart |
 | Human-in-the-loop pause/resume | Not supported (needs a persistent checkpointer) |
-| Prompt storage | Prompt files in this repo |
+| Prompt storage | Prompt files in this package |
 
 ## Test Plan
 Existing pytest markers apply. All but the last test use fakes, so CI never calls Claude.

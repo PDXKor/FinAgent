@@ -1,7 +1,7 @@
-# FinAgentFrontEnd — Design
+# Frontend — Design
 
 ## Purpose
-Browser UI over two backends: browse data from **FinAgentData**, launch and watch workflows from **FinAgent**. Single user, local first.
+Browser UI over two backends in this monorepo: browse data from the **data API** (`data/`, "FinAgentData"), launch and watch workflows from **agents** (`agents/`, "FinAgent"). Single user, local first.
 
 ## System
 
@@ -44,7 +44,7 @@ Prerequisite: Node LTS (v26; per-user install in `%LOCALAPPDATA%\Programs\nodejs
 
 Built (ingestion):
 ```
-FinAgentFrontEnd/
+frontend/
   package.json  vite.config.ts  tsconfig.json  .env.example
   src/
     main.tsx  App.tsx  index.css
@@ -105,7 +105,7 @@ Input form: map workflow input types to controls — `str` text, `int`/`float` n
 - Run triggers cost money: confirm dialog with models and effort; agents API enforces its own limits.
 - Markdown: no `rehype-raw`; links open with `rel="noopener noreferrer"`.
 
-## Required Changes — FinAgentData
+## Required Changes — data/ (FinAgentData)
 
 | # | Change | Why |
 |---|---|---|
@@ -118,14 +118,14 @@ Input form: map workflow input types to controls — `str` text, `int`/`float` n
 | D7 | Add `cancelled` to `AgentRunIn.status`. | Cancel support (A3) |
 | D8 | Watchlist moves to Curation: table `watchlist(ticker PK, added_at, note)`; `GET/PUT/DELETE /v1/watchlist[/{ticker}]`. Recon reads the table; `slice.txt` imported once. | Edit from UI; closes design open question |
 | D9 | **Done.** Operation ids = route names. | Clean generated client names |
-| D10 | Commit the `http-api` branch work (API, queries, jobs) and add a git remote. | UI depends on it |
+| D10 | **Done.** Work committed; merged into the monorepo with history. | UI depends on it |
 | D11 | **Done.** Recon job control: `GET /v1/jobs`, `POST /v1/jobs/{name}/runs` (background thread, one job at a time, `409` when busy), `GET /v1/ingest-runs`, `GET /v1/ops/counts`. `recon.pipeline.ingest` returns `RunResult` or raises. | Ingestion page |
 | D12 | Mark stale `running` ingest rows `failed` on API start (job threads die with the server). | No zombie "running elsewhere" rows |
 | D13 | Progress counters during a run (runner updates `requests`/`rows_written` every N requests). | Live progress for long jobs |
 
 List endpoints use `{items, next}`; existing bare-list endpoints stay as-is in `/v1` (additive only).
 
-## Required Changes — FinAgent
+## Required Changes — agents/ (FinAgent)
 
 | # | Change | Why |
 |---|---|---|
@@ -135,8 +135,8 @@ List endpoints use `{items, next}`; existing bare-list endpoints stay as-is in `
 | A4 | Events: run graph with `astream_events` (or `astream` with `updates` + `messages`) instead of `ainvoke`; publish to a per-run in-memory broadcaster; SSE subscribers read it. Usage counting unchanged. Not persisted (deferred). | Live timeline |
 | A5 | `Workflow.describe()` exposes `input` types, `timeout_s`, `max_concurrency`, `schedule` — not just node bindings. | Catalog + generated forms |
 | A6 | On server start, mark stale `running` runs (from D1 `status=running`) as `failed: interrupted`. Single agents process assumed. | No zombie "running" rows after restart |
-| A7 | Add `python-dotenv` to dependencies (`cli.py` imports it; not declared). Add `fastapi`, `uvicorn`, `sse-starlette`. | Clean install fails today |
-| A8 | Cleanup: remove the duplicated `src/finagent/{data,recon}`, `tests/{data,recon}`, `data/`, `duckdb` binary, `venv/` from the `data-layer` branch (now in FinAgentData). Rewrite stale README and Dockerfile (`finagent serve` entrypoint no longer exists). Trim `.env.example` to `FINAGENT_AGENTS_*`. | Repo matches the agents-only split |
+| A7 | `python-dotenv` added (**done**). Add `fastapi`, `uvicorn`, `sse-starlette` with A1. | Clean install |
+| A8 | **Done.** Duplicated data/recon removed, stale Dockerfile dropped, `.env.example` trimmed, agents moved to `agents/`. Root README covers the monorepo. | Repo matches the split |
 
 ## Milestones
 

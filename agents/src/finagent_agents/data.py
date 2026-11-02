@@ -1,6 +1,6 @@
-"""Seam to the storage repo (FinAgentData).
+"""Seam to the data package (`data/` in this monorepo), reached only over its HTTP API.
 
-Agents depend only on `DataLayer`. `HttpDataLayer` talks to the FinAgentData API;
+Agents depend only on `DataLayer`. `HttpDataLayer` talks to the data API;
 `MemoryDataLayer` serves tests and local runs. Async so a backend never blocks the event loop.
 Add methods only when a tool needs them.
 """

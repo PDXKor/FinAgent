@@ -1,6 +1,6 @@
-# FinAgentData
+# Data
 
-Data layer for FinAgent: one shared store plus the jobs that fill it. Agents live in the separate FinAgent repo.
+Data layer for FinAgent: one shared store, the jobs that fill it (recon), and its HTTP API. Part of the FinAgent monorepo; see the root README.
 
 ## Layout
 

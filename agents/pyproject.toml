@@ -17,6 +17,7 @@ dependencies = [
     "pyyaml>=6",
     "tzdata>=2024.1",
     "langchain-anthropic>=1.7",
+    "python-dotenv>=1",
 ]
 
 [project.optional-dependencies]
@@ -37,3 +38,9 @@ markers = ["unit: pure, no DB/network", "component: temp DB + fakes", "contract:
 
 [tool.ruff]
 line-length = 100
+
+[tool.ruff.lint]
+extend-select = ["TID251"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"finagent".msg = "agents reach data over HTTP only (HttpDataLayer); never import the data package"

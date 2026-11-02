@@ -54,7 +54,7 @@ src/finagent/
 ```
 
 ## Consumer API
-Consumers (FinAgent agents, FinAgentFrontEnd) run in other repos and processes. They reach the store over HTTP only; no shared code. `finagent.api` is a thin FastAPI layer over `finagent.data.queries`, plus recon job control.
+Consumers (`agents/`, `frontend/`) run in other processes. They reach the store over HTTP only and import no code from this package. `finagent.api` is a thin FastAPI layer over `finagent.data.queries`, plus recon job control.
 
 ```
 FinAgent / FrontEnd ──HTTP /v1──► finagent.api ──► data.queries ──► SQLite (WAL)

@@ -1,13 +1,13 @@
-# FinAgentFrontEnd
+# Frontend
 
-Web UI for FinAgent agents and FinAgentData data. Design: [design.md](design.md).
+Web UI for FinAgent. Design: [design.md](design.md).
 
 Today: the **Ingestion** page runs recon jobs and shows their status and history.
 
 ## Run
 
 ```bash
-# 1. FinAgentData API (in ../FinAgentData; needs FINAGENT_SEC_USER_AGENT in its .env)
+# 1. Data API (in ../data; needs FINAGENT_SEC_USER_AGENT in data/.env)
 finagent-data serve                 # http://127.0.0.1:8765
 
 # 2. UI

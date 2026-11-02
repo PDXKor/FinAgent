@@ -1,28 +1,31 @@
 # FinAgent
 
-Cloud-neutral LangGraph agents that retrieve financial information on a schedule and write a brief.
+Small-cap financial research: SEC data ingestion, LLM agent workflows, and a web UI.
 
 ## Layout
 
-- `src/finagent/graph.py` – LangGraph workflow (`fetch` → `summarize`)
-- `src/finagent/llm/` – pluggable LLM layer (Anthropic, OpenAI, Ollama; `register_provider` for more)
-- `src/finagent/sources/` – pluggable data sources (`yfinance` by default; `register_source` for more)
-- `src/finagent/runner.py` – runs the graph once and writes `reports/report-<timestamp>.md`
-- `src/finagent/cli.py` – `finagent run` (one-shot) and `finagent serve` (built-in cron scheduler)
+| Path | Package | Role | Design |
+|---|---|---|---|
+| `data/` | `finagent-data` (Python) | SQLite store, recon ingestion jobs, HTTP API (`finagent-data serve`, :8765) | [data](data/src/finagent/data/design.md), [recon](data/src/finagent/recon/design.md) |
+| `agents/` | `finagent-agents` (Python) | LangGraph + Claude workflows (`finagent-agents`) | [agents](agents/src/finagent_agents/design/overall-design.md) |
+| `frontend/` | `finagent-frontend` (npm) | React UI behind a same-origin proxy (:5173) | [frontend](frontend/design.md) |
 
-## Quick start
-
-```bash
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -e ".[ollama,dev]"                       # or anthropic / openai
-cp .env.example .env
-pytest
-finagent run
+```
+frontend ──/api/data──► data API ──► SQLite ◄── recon jobs
+agents ──HTTP /v1─────►     │
 ```
 
-## Deploying anywhere
+## Rules
+- **HTTP is the only link.** `agents/` and `frontend/` reach data through the data API. No package imports another; `agents/` enforces it with ruff `TID251`.
+- **One package, one toolchain.** Each package has its own `pyproject.toml`/`package.json`, venv or `node_modules`, `.env`, and tests. Run commands from the package folder.
+- **Contract changes land in one commit:** API route + schema in `data/`, then regenerated types in `frontend/` (`npm run gen:api`) and client methods in `agents/`.
 
-- **Anywhere with a long-running process** (VM, Docker, local): `finagent serve`.
-- **Platform schedulers** (cron, systemd timer, Kubernetes CronJob, Cloud Run/ECS jobs, GitHub Actions): run `finagent run`.
-- Docker: `docker build --build-arg LLM_EXTRA=anthropic -t finagent .`
-- All config is `FINAGENT_*` environment variables; see `.env.example`.
+## Quick Start (Windows)
+
+```bash
+cd data     && python -m venv .venv && .venv\Scripts\pip install -e ".[dev]" && cd ..
+cd agents   && python -m venv .venv && .venv\Scripts\pip install -e ".[dev]" && cd ..
+cd frontend && npm install && cd ..
+```
+
+Run (one terminal each): `data> finagent-data serve`, `frontend> npm run dev`. Each package README has details.
