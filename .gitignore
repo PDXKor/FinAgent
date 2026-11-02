@@ -1,9 +1,9 @@
+# Shared. Package-specific rules live in each package's own .gitignore.
 __pycache__/
 *.egg-info/
 .venv/
 .env
-reports/
 .pytest_cache/
 .ruff_cache/
 dist/
-data/
+reports/
