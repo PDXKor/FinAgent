@@ -9,8 +9,14 @@ from finagent.data.db import DatabaseLockedError, connect, is_locked, upsert
 
 pytestmark = pytest.mark.component
 
-TABLES = {"companies", "tickers", "filings", "facts", "public_float", "ingest_runs", "source_state"}
-VIEWS = {"v_recent_filings", "v_latest_financials", "v_small_cap_candidates"}
+TABLES = {
+    "companies", "tickers", "filings", "facts", "public_float", "ingest_runs", "source_state",
+    "agent_runs",
+}  # fmt: skip
+VIEWS = {
+    "v_recent_filings", "v_fact_metrics", "v_latest_financials", "v_annual_financials",
+    "v_small_cap_candidates",
+}  # fmt: skip
 
 
 @pytest.fixture

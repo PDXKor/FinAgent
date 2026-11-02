@@ -76,3 +76,20 @@ CREATE TABLE IF NOT EXISTS source_state (
   raw_path        VARCHAR,
   PRIMARY KEY (job, key)
 );
+
+-- Agents
+-- One row per agent workflow run. JSON columns hold text written by the agents repo.
+CREATE TABLE IF NOT EXISTS agent_runs (
+  run_id            VARCHAR PRIMARY KEY,
+  workflow          VARCHAR,
+  status            VARCHAR,   -- running | ok | failed | timeout
+  inputs            VARCHAR,   -- JSON
+  output            VARCHAR,   -- JSON
+  error             VARCHAR,
+  bindings          VARCHAR,   -- JSON: node -> {model, effort, prompt, tools}
+  started_at        TIMESTAMP,
+  finished_at       TIMESTAMP,
+  input_tokens      INTEGER,
+  output_tokens     INTEGER,
+  cache_read_tokens INTEGER
+);

@@ -25,7 +25,7 @@ SQLite, WAL mode, one file (`data/finagent.db`), stdlib `sqlite3`.
 | Fundamentals | `filings`, `facts`, `public_float` | recon (SEC) | built |
 | Ops | `ingest_runs`, `source_state` | recon runner | built |
 | Market | prices, volume | new producer | planned |
-| Agents | `agent_runs`, agent outputs | FinAgent agents | planned |
+| Agents | `agent_runs` | FinAgent agents (via API) | built |
 | Curation | watchlists, notes | manual / CLI | planned (watchlist is a file today) |
 
 Rule: a new domain adds tables and query functions to `finagent.data`; the producer lives in its own package next to `recon`.
@@ -36,7 +36,9 @@ Now:
 ```
 src/finagent/
   data/     db.py  raw.py  schema.sql  views.sql  timeutil.py
+            queries/  reference.py  fundamentals.py  agents.py  ops.py
   recon/    jobs/  runner.py  pipeline.py  scheduler.py  cli.py
+  api/      app.py  schemas.py  config.py  cli.py  jobs.py   # HTTP service over queries/ + recon jobs
 ```
 
 Target:
@@ -52,12 +54,36 @@ src/finagent/
 ```
 
 ## Consumer API
-Not designed yet. FinAgent agents will consume it. Constraints known today:
-- Agents read reference, fundamentals and market data, and write agent runs and outputs.
-- Agents run concurrently. WAL allows reads while a producer writes.
-- Agents must not depend on table layout. They call query functions only.
+Consumers (FinAgent agents, FinAgentFrontEnd) run in other repos and processes. They reach the store over HTTP only; no shared code. `finagent.api` is a thin FastAPI layer over `finagent.data.queries`, plus recon job control.
+
+```
+FinAgent / FrontEnd ──HTTP /v1──► finagent.api ──► data.queries ──► SQLite (WAL)
+                                       └─ jobs ──► recon ──► data.upsert ──┘
+```
+
+| Method | Path | Backed by |
+|---|---|---|
+| GET | `/v1/health` | — |
+| GET | `/v1/companies/{ticker}` | `reference.get_company` (404 if unknown) |
+| GET | `/v1/companies/{ticker}/financials?limit=8` | `fundamentals.get_financials` (limit ≤ 20) |
+| PUT | `/v1/agent-runs/{run_id}` | `agents.save_agent_run` (idempotent upsert) |
+| GET | `/v1/agent-runs/{run_id}` | `agents.get_agent_run` |
+| GET | `/v1/jobs` | recon `REGISTRY` + `jobs.yaml` + `ops.latest_ingest_runs` |
+| POST | `/v1/jobs/{name}/runs` | starts `recon.pipeline.ingest` in a thread; `202`, `409` if any job runs |
+| GET | `/v1/ingest-runs?job=&limit=50` | `ops.list_ingest_runs` (limit ≤ 200) |
+| GET | `/v1/ops/counts` | `ops.table_counts` |
+
+- **Contract:** `api/schemas.py`. Add fields freely; breaking changes go to `/v2`.
+- **Financials:** annual, from `v_annual_financials` (one row per fiscal year, 10-K; latest filing wins; shares from the year's original 10-K cover). Quarterly: later.
+- **Connections:** one per request, opened and closed in the handler (sqlite3 is thread-bound; handlers run in a threadpool).
+- **Writes:** wait `FINAGENT_API_LOCK_WAIT` (5s) for the writer lock, then `503` + `Retry-After`. Client retries.
+- **Auth:** binds `127.0.0.1`. `FINAGENT_API_TOKEN` set → bearer token required.
+- **Run:** `finagent-data serve` (`FINAGENT_API_HOST`, `FINAGENT_API_PORT`, default 8765).
+- **Timestamps:** stored naive UTC; the API sends them with `Z`.
+- **Jobs:** one at a time per API process (`api/jobs.py`); progress and results are `ingest_runs` rows. Waits `FINAGENT_JOB_LOCK_WAIT` (30s) for the writer lock. Needs `FINAGENT_SEC_USER_AGENT`. The API does not run the scheduler; a job killed with the server leaves a `running` row. This makes `api` depend on `recon`.
+- **OpenAPI:** operation ids are route function names (clean generated clients).
+- New endpoint = query function + schema + route, added when a consumer needs it.
 
 ## Open Questions
 - **Migrations:** `schema.sql` is `CREATE IF NOT EXISTS` only. Column changes need versioned migrations (`PRAGMA user_version` is taken by the schema hash today).
-- **Distribution:** how FinAgent depends on this package (editable path install, git dependency, or a service).
 - **Watchlist:** stays a file, or moves into the Curation tables.

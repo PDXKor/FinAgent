@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from finagent.data.db import DatabaseLockedError, connect
+from finagent.data.queries.ops import latest_ingest_runs, table_counts
 from finagent.recon.config import Settings
 from finagent.recon.jobs import REGISTRY
 from finagent.recon.pipeline import reparse_job, run_job
@@ -22,21 +23,19 @@ def _status(settings: Settings) -> int:
         print(f"status: failed: {e}")
         return 1
     try:
-        runs = con.execute(
-            "SELECT job, status, started_at, requests, rows_written, errors FROM ("
-            "  SELECT *, row_number() OVER (PARTITION BY job ORDER BY started_at DESC) AS rn "
-            "  FROM ingest_runs) WHERE rn = 1 ORDER BY job"
-        ).fetchall()
+        runs = latest_ingest_runs(con)
         if runs:
             print(f"{'job':<26}{'status':<9}{'started (UTC)':<21}{'req':>5}{'rows':>8}{'err':>5}")
-            for job, status, started, req, rows, err in runs:
-                when = started[:19]  # ISO text: YYYY-MM-DD HH:MM:SS
+            for r in runs:
+                job, status, req, rows, err = (
+                    r["job"], r["status"], r["requests"], r["rows_written"], r["errors"]
+                )  # fmt: skip
+                when = r["started_at"][:19]  # ISO text: YYYY-MM-DD HH:MM:SS
                 print(f"{job:<26}{status:<9}{when:<21}{req or 0:>5}{rows or 0:>8}{err or 0:>5}")
         else:
             print("No runs yet.")
         print()
-        for table in COUNTED_TABLES:
-            n = con.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+        for table, n in table_counts(con, COUNTED_TABLES).items():
             print(f"{table:<12}{n:>10}")
     finally:
         con.close()

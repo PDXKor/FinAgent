@@ -8,13 +8,12 @@ LEFT JOIN (SELECT cik, min(ticker) AS ticker FROM tickers GROUP BY cik) t USING 
 WHERE f.filed_date >= date('now', '-30 day')
 ORDER BY f.filed_date DESC, t.ticker;
 
--- Latest value per company per metric, pivoted wide.
--- Balance-sheet items: latest period of any filing.
--- Income items: latest full-year (350-380 day) period from a 10-K, so quarters and YTD never mix in.
-DROP VIEW IF EXISTS v_latest_financials;
-CREATE VIEW v_latest_financials AS
-WITH tagged AS (
-  SELECT cik, period_end, filed_date, value,
+-- Headline facts tagged with a metric name. Base for the financials views.
+-- Flow (income) metrics cover a period; the rest are point-in-time.
+DROP VIEW IF EXISTS v_fact_metrics;
+CREATE VIEW v_fact_metrics AS
+SELECT * FROM (
+  SELECT cik, period_start, period_end, value, fy, fp, form, accession_no, filed_date,
     CASE concept
       WHEN 'Revenues' THEN 'revenue'
       WHEN 'RevenueFromContractWithCustomerExcludingAssessedTax' THEN 'revenue'
@@ -30,15 +29,18 @@ WITH tagged AS (
     concept IN ('Revenues', 'RevenueFromContractWithCustomerExcludingAssessedTax',
                 'RevenueFromContractWithCustomerIncludingAssessedTax',
                 'NetIncomeLoss', 'OperatingIncomeLoss') AS is_flow,
-    form, period_start
+    julianday(period_end) - julianday(period_start) BETWEEN 350 AND 380 AS is_full_year
   FROM facts
-),
-usable AS (
-  SELECT * FROM tagged
-  WHERE metric IS NOT NULL
-    AND (NOT is_flow
-         OR (form LIKE '10-K%'
-             AND julianday(period_end) - julianday(period_start) BETWEEN 350 AND 380))
+) WHERE metric IS NOT NULL;
+
+-- Latest value per company per metric, pivoted wide.
+-- Balance-sheet items: latest period of any filing.
+-- Income items: latest full-year (350-380 day) period from a 10-K, so quarters and YTD never mix in.
+DROP VIEW IF EXISTS v_latest_financials;
+CREATE VIEW v_latest_financials AS
+WITH usable AS (
+  SELECT * FROM v_fact_metrics
+  WHERE NOT is_flow OR (form LIKE '10-K%' AND is_full_year)
 ),
 ranked AS (
   SELECT *, row_number() OVER (
@@ -65,6 +67,58 @@ FROM latest l
 JOIN companies c USING (cik)
 LEFT JOIN (SELECT cik, min(ticker) AS ticker FROM tickers GROUP BY cik) t USING (cik)
 GROUP BY c.cik, t.ticker, c.name;
+
+-- One row per company per fiscal year, from 10-Ks. A fiscal year is any period end with a
+-- full-year income value. Values: latest filing wins, so restatements replace originals.
+-- Shares outstanding: cover page of the year's original 10-K.
+DROP VIEW IF EXISTS v_annual_financials;
+CREATE VIEW v_annual_financials AS
+WITH annual AS (
+  SELECT * FROM v_fact_metrics
+  WHERE form LIKE '10-K%' AND (is_flow AND is_full_year OR NOT is_flow)
+),
+latest AS (
+  SELECT cik, metric, period_end, value FROM (
+    SELECT *, row_number() OVER (
+      PARTITION BY cik, metric, period_end ORDER BY filed_date DESC) AS rn
+    FROM annual WHERE metric <> 'shares_outstanding'
+  ) WHERE rn = 1
+),
+original AS (
+  SELECT cik, period_end, fy, form, filed_date, accession_no FROM (
+    SELECT *, row_number() OVER (PARTITION BY cik, period_end ORDER BY filed_date) AS rn
+    FROM annual WHERE is_flow
+  ) WHERE rn = 1
+),
+cover AS (
+  SELECT accession_no, period_end, value AS shares FROM annual
+  WHERE metric = 'shares_outstanding'
+),
+shares AS (
+  SELECT accession_no, shares FROM (
+    SELECT *, row_number() OVER (PARTITION BY accession_no ORDER BY period_end DESC) AS rn
+    FROM cover
+  ) WHERE rn = 1
+)
+SELECT
+  o.cik,
+  o.fy AS fiscal_year,
+  o.period_end,
+  max(l.value) FILTER (WHERE l.metric = 'revenue') AS revenue,
+  max(l.value) FILTER (WHERE l.metric = 'net_income') AS net_income,
+  max(l.value) FILTER (WHERE l.metric = 'operating_income') AS operating_income,
+  max(l.value) FILTER (WHERE l.metric = 'assets') AS assets,
+  max(l.value) FILTER (WHERE l.metric = 'liabilities') AS liabilities,
+  max(l.value) FILTER (WHERE l.metric = 'equity') AS equity,
+  max(l.value) FILTER (WHERE l.metric = 'cash') AS cash,
+  s.shares AS shares_outstanding,
+  o.form,
+  o.filed_date,
+  o.accession_no
+FROM original o
+JOIN latest l USING (cik, period_end)
+LEFT JOIN shares s USING (accession_no)
+GROUP BY o.cik, o.period_end;
 
 -- Latest public float per company, at or below $2B (the small-cap ceiling). Zero floats
 -- (no public market) are excluded. Float excludes insider/affiliate holdings and can be up to
