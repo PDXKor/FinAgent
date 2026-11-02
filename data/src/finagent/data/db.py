@@ -44,7 +44,7 @@ def is_locked(e: BaseException) -> bool:
 
 def _ensure_schema(con: sqlite3.Connection) -> None:
     """Apply schema and views when their text changed. `user_version` holds a hash of both."""
-    script = SCHEMA.read_text() + "\n" + VIEWS.read_text()
+    script = SCHEMA.read_text(encoding="utf-8") + "\n" + VIEWS.read_text(encoding="utf-8")
     version = zlib.crc32(script.encode()) & 0x7FFFFFFF
     if con.execute("PRAGMA user_version").fetchone()[0] == version:
         return

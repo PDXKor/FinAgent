@@ -46,7 +46,10 @@ def db_path(tmp_path):
 
 @pytest.fixture
 def client(db_path):
-    return TestClient(create_app(ApiSettings(db_path=db_path, api_token=None, _env_file=None)))
+    return TestClient(
+        base_url="http://localhost",
+        app=create_app(ApiSettings(db_path=db_path, api_token=None, _env_file=None)),
+    )
 
 
 def test_health(client):
@@ -88,7 +91,7 @@ def test_write_while_locked_returns_503(db_path):
     holder = connect(db_path)
     holder.execute("BEGIN IMMEDIATE")
     try:
-        got = TestClient(app).put("/v1/agent-runs/r1", json=RUN)
+        got = TestClient(base_url="http://localhost", app=app).put("/v1/agent-runs/r1", json=RUN)
     finally:
         holder.rollback()
         holder.close()
@@ -98,7 +101,7 @@ def test_write_while_locked_returns_503(db_path):
 
 def test_token_enforced_when_set(db_path):
     app = create_app(ApiSettings(db_path=db_path, api_token="s3cret", _env_file=None))
-    c = TestClient(app)
+    c = TestClient(base_url="http://localhost", app=app)
     assert c.get("/v1/health").status_code == 401
     assert c.get("/v1/health", headers={"Authorization": "Bearer nope"}).status_code == 401
     assert c.get("/v1/health", headers={"Authorization": "Bearer s3cret"}).status_code == 200
@@ -106,7 +109,9 @@ def test_token_enforced_when_set(db_path):
 
 def test_blank_token_means_no_auth(db_path, monkeypatch):
     monkeypatch.setenv("FINAGENT_API_TOKEN", "")
-    c = TestClient(create_app(ApiSettings(db_path=db_path, _env_file=None)))
+    c = TestClient(
+        base_url="http://localhost", app=create_app(ApiSettings(db_path=db_path, _env_file=None))
+    )
     assert c.get("/v1/health").status_code == 200
 
 
@@ -119,11 +124,86 @@ def test_list_agent_runs_filters_and_pages(client):
 
     page = client.get("/v1/agent-runs?limit=3").json()
     assert [r["run_id"] for r in page["items"]] == ["r3", "r2", "r1"]
-    assert page["next"] == "2026-11-01T12:01:00Z"
-    rest = client.get("/v1/agent-runs", params={"limit": 3, "before": page["next"]}).json()
+    assert page["next"] == "2026-11-01T12:01:00+00:00|r1"
+    rest = client.get("/v1/agent-runs", params={"limit": 3, "cursor": page["next"]}).json()
     assert [r["run_id"] for r in rest["items"]] == ["r0"] and rest["next"] is None
 
     running = client.get("/v1/agent-runs?status=running&workflow=ping").json()["items"]
     assert [r["run_id"] for r in running] == ["r3"]
     assert running[0]["inputs"] == {"text": "hi"}
     assert client.get("/v1/agent-runs?status=weird").status_code == 422
+
+
+def test_paging_does_not_skip_runs_with_equal_start_times(client):
+    for i in range(5):
+        assert client.put(f"/v1/agent-runs/r{i}", json=RUN).status_code == 204  # same started_at
+    seen, cursor = [], None
+    while True:
+        params = {"limit": 2} | ({"cursor": cursor} if cursor else {})
+        page = client.get("/v1/agent-runs", params=params).json()
+        seen += [r["run_id"] for r in page["items"]]
+        if not (cursor := page["next"]):
+            break
+    assert seen == ["r4", "r3", "r2", "r1", "r0"]
+    assert client.get("/v1/agent-runs?cursor=junk").status_code == 422
+
+
+def test_queued_status_accepted(client):
+    assert client.put("/v1/agent-runs/q", json={**RUN, "status": "queued"}).status_code == 204
+    assert [r["run_id"] for r in client.get("/v1/agent-runs?status=queued").json()["items"]] == [
+        "q"
+    ]
+
+
+def test_cross_site_browser_requests_refused(client):
+    for site in ("cross-site", "same-site"):
+        got = client.post("/v1/jobs/sec_tickers/runs", headers={"Sec-Fetch-Site": site})
+        assert got.status_code == 403
+    assert client.get("/v1/health", headers={"Sec-Fetch-Site": "same-origin"}).status_code == 200
+    assert client.get("/v1/health", headers={"Sec-Fetch-Site": "none"}).status_code == 200
+
+
+def test_unknown_host_refused(db_path):
+    app = create_app(ApiSettings(db_path=db_path, _env_file=None))
+    assert TestClient(base_url="http://evil.example", app=app).get("/v1/health").status_code == 400
+    c = TestClient(
+        base_url="http://data:8765",
+        app=create_app(ApiSettings(db_path=db_path, api_allowed_hosts=["data"], _env_file=None)),
+    )
+    assert c.get("/v1/health").status_code == 200
+
+
+def test_docs_only_without_token(db_path):
+    open_app = create_app(ApiSettings(db_path=db_path, _env_file=None))
+    assert (
+        TestClient(base_url="http://localhost", app=open_app).get("/openapi.json").status_code
+        == 200
+    )
+    locked = create_app(ApiSettings(db_path=db_path, api_token="t", _env_file=None))
+    assert (
+        TestClient(base_url="http://localhost", app=locked).get("/openapi.json").status_code == 404
+    )
+
+
+def test_unexpected_database_error_is_logged(client, monkeypatch, caplog):
+    import sqlite3
+
+    def broken(con, ticker):
+        raise sqlite3.OperationalError("no such column: c.sic")
+
+    monkeypatch.setattr("finagent.api.app.get_company", broken)
+    got = client.get("/v1/companies/AAPL")
+    assert got.status_code == 500 and got.json() == {"detail": "database error"}
+    assert "no such column" in caplog.text
+
+
+def test_no_token_warning_only_when_reachable_beyond_localhost(db_path, caplog):
+    with TestClient(
+        base_url="http://localhost", app=create_app(ApiSettings(db_path=db_path, _env_file=None))
+    ):
+        pass
+    assert "FINAGENT_API_TOKEN is unset" not in caplog.text
+    exposed = create_app(ApiSettings(db_path=db_path, api_host="0.0.0.0", _env_file=None))
+    with TestClient(base_url="http://localhost", app=exposed):
+        pass
+    assert "FINAGENT_API_TOKEN is unset" in caplog.text

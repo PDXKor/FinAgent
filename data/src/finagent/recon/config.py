@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     sec_user_agent: str  # SEC requires a contact email
     db_path: Path = Path("data/finagent.db")
     raw_dir: Path = Path("data/raw")
+    raw_keep: int = 10  # raw responses kept per job and key; 0 = keep all
     slice_file: Path = Path("data/slice.txt")
     schedule_timezone: str = "UTC"
 

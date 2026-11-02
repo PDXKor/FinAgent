@@ -15,6 +15,8 @@ Gather raw data on small-cap companies from free sources into a local store. Out
 - **First source:** SEC EDGAR (free, no key, authoritative).
 - **Orchestration:** manual CLI first, then APScheduler, then Prefect/Dagster if needed.
 - **Raw first:** save every response to disk before parsing; parsing can be replayed.
+- **Raw retention:** keep the newest `FINAGENT_RAW_KEEP` (10) responses per job and key; `0` keeps all. Reparse reads only the newest.
+- **Snapshots replace:** a job may declare `replace` tables (`sec_tickers` → `tickers`); rows missing from the response are deleted, so delisted tickers drop out. A snapshot under half the table is refused.
 
 - **Small-cap definition:** market cap ≤ $2B, no lower bound.
 

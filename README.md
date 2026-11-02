@@ -18,7 +18,10 @@ browser ─► frontend (proxy) ─┬─ /api/data ───► data API ──
 ## Rules
 - **HTTP is the only link.** `agents/` and `frontend/` reach data through the data API. No package imports another; `agents/` enforces it with ruff `TID251`.
 - **One package, one toolchain.** Each package has its own `pyproject.toml`/`package.json`, venv or `node_modules`, `.env`, and tests. Run commands from the package folder.
-- **Contract changes land in one commit:** API route + schema in `data/`, then regenerated types in `frontend/` (`npm run gen:api`) and client methods in `agents/`.
+- **Contract changes land in one commit:** API route + schema in `data/`, then regenerated types in `frontend/` (`npm run gen:api`, from source) and client methods in `agents/`. CI fails on stale types.
+- **Pinned dependencies:** Python installs use each package's `constraints.txt`; Docker images use exact tags. Refresh constraints with `pip freeze --exclude-editable` after changing dependencies.
+- **Browser safety:** the proxies add tokens, so both APIs refuse cross-site browser requests (`Sec-Fetch-Site`) and unknown `Host` headers (`*_API_ALLOWED_HOSTS`). `/docs` is off when a token is set.
+- **CI** (`.github/workflows/ci.yml`): lint, format, tests per package; front-end build; API-type drift.
 
 ## Docker
 
@@ -46,8 +49,8 @@ docker compose logs -f data
 ## Quick Start (Windows)
 
 ```bash
-cd data     && python -m venv .venv && .venv\Scripts\pip install -e ".[dev]" && cd ..
-cd agents   && python -m venv .venv && .venv\Scripts\pip install -e ".[dev]" && cd ..
+cd data     && python -m venv .venv && .venv\Scripts\pip install -e ".[dev]" -c constraints.txt && cd ..
+cd agents   && python -m venv .venv && .venv\Scripts\pip install -e ".[dev]" -c constraints.txt && cd ..
 cd frontend && npm install && cd ..
 ```
 

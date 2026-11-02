@@ -4,7 +4,7 @@ LangGraph + Claude workflows over FinAgent data. Design: [overall-design.md](src
 
 ```bash
 python -m venv .venv && .venv\Scripts\activate
-pip install -e ".[dev]"
+pip install -e ".[dev]" -c constraints.txt   # pinned, tested versions
 cp .env.example .env        # ANTHROPIC_API_KEY; FINAGENT_AGENTS_DATA_URL to use the data API
 pytest
 finagent-agents list

@@ -176,15 +176,17 @@ tools / Runner ─► DataLayer ─► HttpDataLayer ──HTTP /v1──► fin
 |---|---|---|
 | GET | `/v1/health` | `{status, active_runs}` |
 | GET | `/v1/workflows` | Catalog: graph, input types, node bindings, timeout, schedule |
-| POST | `/v1/workflows/{name}/runs` | `{inputs}` → `202 {run_id, status, started_at}`; `404` unknown, `422` bad input |
+| POST | `/v1/workflows/{name}/runs` | `{inputs}` → `202 {run_id, status: queued, started_at}`; `404` unknown, `422` bad input, `503` data API down |
 | GET | `/v1/runs/{run_id}/events` | SSE, replayed from the start (or after `Last-Event-ID`), ends with `done`. `404` once evicted |
 | POST | `/v1/runs/{run_id}/cancel` | `202`; the run saves itself `cancelled`. `404` if not running here |
 
-- `Runner.start` saves the run `running`, then executes it as a background task. `run`/`run_many` (CLI) are unchanged.
-- **Events** (`events.py`): a LangChain callback publishes `run_start`, `node_start|end|error`, `llm_start|end|error` (model, tokens), `tool_start|end|error` (clipped input/output), `done` (status, tokens). Each carries `span` and `parent` (nearest published ancestor), so fan-out branches form separate trees. `__x__` LangGraph nodes are skipped.
+- `Runner.start` saves the run `queued`; it becomes `running` (saved, `running` event) once past the concurrency limits. The timeout starts then. `run`/`run_many` (CLI) follow the same states.
+- **Final save** retries with backoff; if it still fails, the result is logged so it is not lost silently.
+- **Events** (`events.py`): a LangChain callback publishes `run_start`, `running`, `node_start|end|error`, `llm_start|end|error` (model, tokens), `tool_start|end|error` (clipped input/output), `done` (status, tokens). Each carries `span` and `parent` (nearest published ancestor), so fan-out branches form separate trees. `__x__` LangGraph nodes are skipped.
 - **Retention:** streams live in memory; the newest `FINAGENT_AGENTS_EVENT_RETENTION` (100) finished runs stay replayable.
-- **Startup:** runs a previous process left `running` are saved `failed: interrupted` (one agents process per data store). **Shutdown:** in-flight runs are cancelled and saved.
-- **Auth:** `FINAGENT_AGENTS_API_TOKEN` (blank = none). Binds `127.0.0.1`; `0.0.0.0` in the container.
+- **Startup:** runs a previous process left `queued`/`running` are saved `failed: interrupted` (one agents process per data store). **Shutdown:** in-flight runs are cancelled and saved.
+- **Auth:** `FINAGENT_AGENTS_API_TOKEN` (blank = none, warning when not bound to loopback; `/docs` off when set). Binds `127.0.0.1`; `0.0.0.0` in the container.
+- **Browser safety:** cross-site browser requests get `403`; `Host` must be in `FINAGENT_AGENTS_API_ALLOWED_HOSTS` (add `agents` in containers).
 
 ### Deferred
 | Capability | Until then |

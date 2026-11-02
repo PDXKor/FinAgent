@@ -43,7 +43,7 @@ class AnnualFinancials(BaseModel):
 
 class AgentRunIn(BaseModel):
     workflow: str
-    status: Literal["running", "ok", "failed", "timeout", "cancelled"]
+    status: Literal["queued", "running", "ok", "failed", "timeout", "cancelled"]
     inputs: dict = {}
     output: Any = None
     error: str | None = None
@@ -61,7 +61,7 @@ class AgentRun(AgentRunIn):
 
 class AgentRunPage(BaseModel):
     items: list[AgentRun]
-    next: UtcDatetime | None = None  # pass as `before` for the next page; null = last page
+    next: str | None = None  # opaque cursor for the next page; null = last page
 
 
 class IngestRun(BaseModel):

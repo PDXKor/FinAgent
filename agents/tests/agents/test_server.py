@@ -26,7 +26,7 @@ def settings(**kw) -> AgentSettings:
 def client(data, respond, delay=0.0, **kw) -> TestClient:
     llm = ScriptedChatModel(respond=respond, delay=delay)
     app = create_app(settings(**kw), WORKFLOWS, data=data, make_llm=lambda b: llm)
-    return TestClient(app)
+    return TestClient(app, base_url="http://localhost")
 
 
 def events(c: TestClient, run_id: str, headers=None) -> list[tuple[int, str, dict]]:
@@ -66,11 +66,11 @@ def test_start_streams_events_and_saves_run(data):
         started = c.post("/v1/workflows/ping/runs", json={"inputs": {"text": "hi"}})
         assert started.status_code == 202
         body = started.json()
-        assert body["status"] == "running" and body["started_at"].endswith("Z")
+        assert body["status"] == "queued" and body["started_at"].endswith("Z")
         evs = events(c, body["run_id"])
 
     types = [t for _, t, _ in evs]
-    assert types[0] == "run_start" and types[-1] == "done"
+    assert types[:2] == ["run_start", "running"] and types[-1] == "done"
     assert {"node_start", "llm_start", "llm_end", "node_end"} <= set(types)
     assert [i for i, _, _ in evs] == list(range(1, len(evs) + 1))
     assert evs[-1][2]["status"] == "ok" and evs[-1][2]["output_tokens"] == 5
@@ -168,3 +168,46 @@ def test_concurrent_subscribers_see_the_same_stream(data):
         for t in threads:
             t.join(10)
     assert results[0] == results[1] and results[0][-1][1] == "done"
+
+
+def test_data_api_down_at_start_is_503(data, monkeypatch):
+    import httpx
+
+    async def down(run):
+        raise httpx.ConnectError("refused")
+
+    monkeypatch.setattr(data, "save_run", down)
+    monkeypatch.setattr(data, "list_runs", lambda status=None, limit=200: _none())
+    with client(data, echo) as c:
+        got = c.post("/v1/workflows/ping/runs", json={"inputs": {"text": "x"}})
+    assert got.status_code == 503 and "data API unavailable" in got.json()["detail"]
+
+
+async def _none():
+    return []
+
+
+def test_cross_site_requests_and_unknown_hosts_refused(data):
+    with client(data, echo) as c:
+        got = c.post("/v1/runs/x/cancel", headers={"Sec-Fetch-Site": "cross-site"})
+        assert got.status_code == 403
+        assert c.get("/v1/health", headers={"Sec-Fetch-Site": "same-origin"}).status_code == 200
+    llm = ScriptedChatModel(respond=echo)
+    app = create_app(settings(), WORKFLOWS, data=data, make_llm=lambda b: llm)
+    with TestClient(app, base_url="http://evil.example") as c:
+        assert c.get("/v1/health").status_code == 400
+
+
+def test_docs_only_without_token(data):
+    with client(data, echo) as c:
+        assert c.get("/openapi.json").status_code == 200
+    with client(data, echo, api_token="t") as c:
+        assert c.get("/openapi.json").status_code == 404
+
+
+def test_startup_also_fails_runs_left_queued(data):
+    stale = RunRecord("q", "ping", {"text": "x"}, "queued", datetime(2026, 11, 1, tzinfo=UTC))
+    asyncio.run(data.save_run(stale))
+    with client(data, echo):
+        pass
+    assert data.runs["q"].status == "failed"

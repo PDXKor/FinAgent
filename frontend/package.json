@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "gen:api": "openapi-typescript http://127.0.0.1:8765/openapi.json -o src/api/generated/data.d.ts && openapi-typescript http://127.0.0.1:8766/openapi.json -o src/api/generated/agents.d.ts"
+    "gen:api": "node scripts/gen-api.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.104.4",

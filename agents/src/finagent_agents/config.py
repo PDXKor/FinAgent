@@ -20,6 +20,8 @@ class AgentSettings(BaseSettings):
     api_host: str = "127.0.0.1"  # `serve`
     api_port: int = 8766
     api_token: str | None = None  # when set, requests need `Authorization: Bearer <token>`
+    # Host header values accepted (blocks DNS rebinding). Add the service name in containers.
+    api_allowed_hosts: list[str] = ["localhost", "127.0.0.1"]
     event_retention: int = 100  # finished runs whose live events stay replayable
 
     @field_validator("data_url", "data_token", "api_token")

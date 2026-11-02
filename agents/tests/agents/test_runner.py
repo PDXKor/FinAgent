@@ -34,7 +34,7 @@ def test_run_lifecycle_saved_with_bindings_and_tokens(data, scripted):
 
     rec = asyncio.run(Runner(WORKFLOWS, data, make_llm=lambda b: llm).run("ping", {"text": "x"}))
 
-    assert statuses == ["running", "ok"]
+    assert statuses == ["queued", "running", "ok"]
     assert data.runs[rec.run_id] == rec
     assert rec.bindings == WORKFLOWS["ping"].describe()
     assert (rec.input_tokens, rec.output_tokens) == (10, 5)
@@ -95,3 +95,42 @@ def test_unknown_workflow_raises(data, scripted):
     runner = Runner(WORKFLOWS, data, make_llm=lambda b: scripted(echo))
     with pytest.raises(WorkflowError, match="nope"):
         asyncio.run(runner.run("nope", {}))
+
+
+def test_final_save_is_retried_then_succeeds(data, scripted, monkeypatch):
+    from finagent_agents import runner as runner_mod
+
+    monkeypatch.setattr(runner_mod, "SAVE_BACKOFF_S", 0)
+    save, calls = data.save_run, []
+
+    async def flaky(r):
+        calls.append(r.status)
+        if r.status == "ok" and calls.count("ok") < 3:
+            raise ConnectionError("blip")
+        await save(r)
+
+    data.save_run = flaky
+    rec = asyncio.run(
+        Runner(WORKFLOWS, data, make_llm=lambda b: scripted(echo)).run("ping", {"text": "x"})
+    )
+    assert calls == ["queued", "running", "ok", "ok", "ok"]
+    assert data.runs[rec.run_id].status == "ok"
+
+
+def test_final_save_failure_logs_the_result(data, scripted, monkeypatch, caplog):
+    from finagent_agents import runner as runner_mod
+
+    monkeypatch.setattr(runner_mod, "SAVE_BACKOFF_S", 0)
+    save = data.save_run
+
+    async def broken_final(r):
+        if r.status == "ok":
+            raise ConnectionError("down")
+        await save(r)
+
+    data.save_run = broken_final
+    with pytest.raises(ConnectionError):
+        asyncio.run(
+            Runner(WORKFLOWS, data, make_llm=lambda b: scripted(echo)).run("ping", {"text": "x"})
+        )
+    assert "not saved" in caplog.text and "echo text: x" in caplog.text

@@ -16,6 +16,7 @@ class SecTickers:
     name = "sec_tickers"
     source = "sec"
     keys: ClassVar[dict[str, list[str]]] = {"companies": ["cik"], "tickers": ["ticker"]}
+    replace: ClassVar[tuple[str, ...]] = ("tickers",)  # the file lists every current ticker
 
     def plan(self, con) -> Iterable[Request]:
         yield Request(URL, "all")

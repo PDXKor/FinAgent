@@ -61,7 +61,7 @@ def load_schedule(path: str | Path) -> dict[str, str]:
     path = Path(path)
     if not path.exists():
         raise ScheduleError(f"schedule file not found: {path}")
-    doc = yaml.safe_load(path.read_text()) or {}
+    doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     schedule: dict[str, str] = {}
     for name, cfg in (doc.get("jobs") or {}).items():
         if name not in REGISTRY:

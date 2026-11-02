@@ -71,7 +71,7 @@ def test_invalid_workflow_raises_at_load(write, body, message):
 
 def test_validate_inputs(write):
     w = write(
-        "workflows:\n  w:\n    graph: single\n    input: { tickers: \"list[str]\", n: int }\n"
+        'workflows:\n  w:\n    graph: single\n    input: { tickers: "list[str]", n: int }\n'
         "    nodes: { agent: { prompt: p@1 } }\n"
     )["w"]
     assert w.validate({"tickers": ["A"], "n": "3"}) == {"tickers": ["A"], "n": 3}

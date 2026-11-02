@@ -1,13 +1,13 @@
 # Data API + recon jobs. State lives in the /data volume (SQLite, raw SEC responses, slice.txt).
-FROM python:3.13-slim
+FROM python:3.13.14-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /app
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md constraints.txt ./
 COPY src ./src
-RUN pip install . \
+RUN pip install -c constraints.txt . \
  && useradd --uid 1000 --create-home app \
  && mkdir /data && chown app /data
 USER app

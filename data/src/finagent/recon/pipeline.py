@@ -20,7 +20,7 @@ def _open_and_run(
             client.close()
         raise
     try:
-        return action(Runner(con, client, settings.raw_dir))
+        return action(Runner(con, client, settings.raw_dir, raw_keep=settings.raw_keep))
     finally:
         con.close()
         if client is not None:

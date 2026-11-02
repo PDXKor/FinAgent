@@ -44,20 +44,22 @@ def list_agent_runs(
     con: sqlite3.Connection,
     workflow: str | None = None,
     status: str | None = None,
-    before: datetime | None = None,
+    after: tuple[datetime, str] | None = None,
     limit: int = 50,
 ) -> list[dict]:
-    """Newest first. `before` (exclusive) pages by started_at."""
+    """Newest first, ties broken by run_id. `after` = (started_at, run_id) of the last row
+    already seen; rows after it in that order are returned."""
     where, params = [], []
     for col, val in (("workflow", workflow), ("status", status)):
         if val is not None:
             where.append(f"{col} = ?")
             params.append(val)
-    if before is not None:
-        where.append("started_at < ?")
-        params.append(_naive_utc(before))
+    if after is not None:
+        started, run_id = _naive_utc(after[0]), after[1]
+        where.append("(started_at < ? OR (started_at = ? AND run_id < ?))")
+        params += [started, started, run_id]
     sql = "SELECT * FROM agent_runs"
     if where:
         sql += " WHERE " + " AND ".join(where)
-    sql += " ORDER BY started_at DESC LIMIT ?"
+    sql += " ORDER BY started_at DESC, run_id DESC LIMIT ?"
     return [_decode(r) for r in rows(con.execute(sql, [*params, limit]))]

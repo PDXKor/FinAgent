@@ -46,7 +46,7 @@ def db_path(tmp_path):
 
 def make(db_path, runner):
     app = create_app(ApiSettings(db_path=db_path, _env_file=None), run_job=runner)
-    return app, TestClient(app)
+    return app, TestClient(base_url="http://localhost", app=app)
 
 
 def test_list_jobs_in_registry_order_with_last_run_and_schedule(db_path):
@@ -131,6 +131,32 @@ def test_default_runner_calls_recon_ingest(db_path, monkeypatch):
         lambda s, job, lock_wait: calls.append((s.db_path, job, lock_wait)),
     )
     app = create_app(ApiSettings(db_path=db_path, job_lock_wait=7, _env_file=None))
-    TestClient(app).post("/v1/jobs/sec_frames/runs")
+    TestClient(base_url="http://localhost", app=app).post("/v1/jobs/sec_frames/runs")
     assert app.state.jobs.wait(5)
     assert calls == [(db_path, "sec_frames", 7)]
+
+
+def test_shutdown_marks_this_process_running_job_interrupted(db_path):
+    runner = FakeRunner()
+    app, c = make(db_path, runner)
+    with c:
+        c.post("/v1/jobs/sec_frames/runs")
+        assert runner.started.wait(5)
+        con = connect(db_path)  # the runner's own record, as the real recon runner writes it
+        con.execute(
+            "INSERT INTO ingest_runs (run_id, job, started_at, status) VALUES "
+            "('live', 'sec_frames', ?, 'running')",
+            [app.state.jobs.active.started_at],
+        )
+        con.close()
+    runner.release.set()
+    con = connect(db_path)
+    rows = dict(con.execute("SELECT run_id, status FROM ingest_runs WHERE job = 'sec_frames'"))
+    sample = con.execute("SELECT error_sample FROM ingest_runs WHERE run_id = 'live'").fetchone()[0]
+    con.close()
+    assert rows == {"live": "failed", "c": "partial"}  # older run untouched
+    assert sample == "interrupted: API stopped"
+    con = connect(db_path)
+    other = con.execute("SELECT status FROM ingest_runs WHERE run_id = 'b'").fetchone()[0]
+    con.close()
+    assert other == "running"  # sec_tickers' row was not started by this process

@@ -82,7 +82,7 @@ export interface paths {
         };
         /**
          * Agent Runs
-         * @description Newest first. Page with `before` = the previous page's `next`.
+         * @description Newest first. Page with `cursor` = the previous page's `next`.
          */
         get: operations["agent_runs"];
         put?: never;
@@ -182,7 +182,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "running" | "ok" | "failed" | "timeout" | "cancelled";
+            status: "queued" | "running" | "ok" | "failed" | "timeout" | "cancelled";
             /**
              * Inputs
              * @default {}
@@ -234,7 +234,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "running" | "ok" | "failed" | "timeout" | "cancelled";
+            status: "queued" | "running" | "ok" | "failed" | "timeout" | "cancelled";
             /**
              * Inputs
              * @default {}
@@ -581,8 +581,8 @@ export interface operations {
         parameters: {
             query?: {
                 workflow?: string | null;
-                status?: ("running" | "ok" | "failed" | "timeout" | "cancelled") | null;
-                before?: string | null;
+                status?: ("queued" | "running" | "ok" | "failed" | "timeout" | "cancelled") | null;
+                cursor?: string | null;
                 limit?: number;
             };
             header?: {

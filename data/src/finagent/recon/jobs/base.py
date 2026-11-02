@@ -14,6 +14,8 @@ class Job(Protocol):
     name: str
     source: str  # rate-limit bucket
     keys: dict[str, list[str]]  # table -> upsert key columns
+    # Optional `replace: tuple[str, ...]`: tables each response fully replaces (single-column
+    # key); rows missing from the response are deleted.
 
     def plan(self, con) -> Iterable[Request]: ...
 

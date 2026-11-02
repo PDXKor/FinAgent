@@ -1,3 +1,4 @@
+import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,6 +13,7 @@ from finagent.recon.jobs.base import Job, Request
 
 MAX_ATTEMPTS = 3
 DEFAULT_RATES = {"sec": 5.0}  # requests/sec per source; SEC allows 10
+MIN_SNAPSHOT_SHARE = 0.5  # a replacing snapshot below this share of the table is refused
 
 
 class FetchError(Exception):
@@ -46,10 +48,13 @@ class RunResult:
 
 
 class Runner:
-    def __init__(self, con, client: httpx.Client, raw_dir, rates=None, sleep=time.sleep):
+    def __init__(
+        self, con, client: httpx.Client, raw_dir, rates=None, sleep=time.sleep, raw_keep: int = 0
+    ):
         self.con = con
         self.client = client
         self.raw_dir = raw_dir
+        self.raw_keep = raw_keep
         self.rates = {**DEFAULT_RATES, **(rates or {})}
         self.sleep = sleep  # backoff sleeper
         self._limiters: dict[str, RateLimiter] = {}
@@ -103,7 +108,9 @@ class Runner:
         if resp.status_code == 404:  # optional request with no data
             return 0
         now = utcnow()
-        path = save_raw(self.raw_dir, job.source, job.name, req.key, resp.content, now)
+        path = save_raw(
+            self.raw_dir, job.source, job.name, req.key, resp.content, now, keep=self.raw_keep
+        )
         written = self._ingest(job, req, resp.content)
         upsert(
             self.con,
@@ -125,7 +132,23 @@ class Runner:
         written = 0
         for table, rows in job.parse(req, body).items():
             written += upsert(self.con, table, rows, job.keys[table])
+            if table in getattr(job, "replace", ()):
+                self._prune(table, job.keys[table], rows)
         return written
+
+    def _prune(self, table: str, keys: list[str], rows: list[dict]) -> None:
+        """Delete rows missing from a full snapshot. A suspiciously small snapshot (e.g. a
+        truncated response) is refused rather than wiping the table."""
+        (key,) = keys
+        existing = self.con.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+        if len(rows) < existing * MIN_SNAPSHOT_SHARE:
+            raise ValueError(
+                f"{table}: snapshot of {len(rows)} rows is under half of {existing}; not pruning"
+            )
+        self.con.execute(
+            f"DELETE FROM {table} WHERE {key} NOT IN (SELECT value FROM json_each(?))",
+            [json.dumps([r[key] for r in rows])],
+        )
 
     def _fetch(self, source: str, req: Request) -> httpx.Response:
         limiter = self._limiters.setdefault(source, RateLimiter(self.rates.get(source, 1.0)))

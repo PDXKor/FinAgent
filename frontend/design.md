@@ -109,7 +109,7 @@ Input form: map workflow input types to controls — `str` text, `int`/`float` n
 
 | # | Change | Why |
 |---|---|---|
-| D1 | **Partly done.** `GET /v1/agent-runs?workflow=&status=&before=&limit=` → `{items, next}`, index on `started_at`. Still to add: `ticker` filter (`$.ticker` or any of `$.tickers`). | Runs page, company briefs, dashboard |
+| D1 | **Partly done.** `GET /v1/agent-runs?workflow=&status=&cursor=&limit=` → `{items, next}`, ties broken by run_id, index on `started_at`. Still to add: `ticker` filter (`$.ticker` or any of `$.tickers`). | Runs page, company briefs, dashboard |
 | D2 | `GET /v1/companies?q=&limit=` — ticker/name prefix search | Typeahead |
 | D3 | `GET /v1/screens/small-caps?min_float=&max_float=&exchange=&sic=&location=&limit=&offset=` over `v_small_cap_candidates` | Screener |
 | D4 | `GET /v1/companies/{ticker}/filings?form=&limit=` over `v_recent_filings` | Company page |
@@ -120,7 +120,7 @@ Input form: map workflow input types to controls — `str` text, `int`/`float` n
 | D9 | **Done.** Operation ids = route names. | Clean generated client names |
 | D10 | **Done.** Work committed; merged into the monorepo with history. | UI depends on it |
 | D11 | **Done.** Recon job control: `GET /v1/jobs`, `POST /v1/jobs/{name}/runs` (background thread, one job at a time, `409` when busy), `GET /v1/ingest-runs`, `GET /v1/ops/counts`. `recon.pipeline.ingest` returns `RunResult` or raises. | Ingestion page |
-| D12 | Mark stale `running` ingest rows `failed` on API start (job threads die with the server). | No zombie "running elsewhere" rows |
+| D12 | **Mostly done.** Shutdown marks the API's own running job `failed: interrupted`. A hard kill still leaves `running`. | No zombie "running elsewhere" rows |
 | D13 | Progress counters during a run (runner updates `requests`/`rows_written` every N requests). | Live progress for long jobs |
 
 List endpoints use `{items, next}`; existing bare-list endpoints stay as-is in `/v1` (additive only).

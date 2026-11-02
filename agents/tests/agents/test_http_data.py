@@ -119,8 +119,8 @@ def test_list_runs_follows_pages_and_parses_records():
 
     def handler(request):
         seen.append(dict(request.url.params))
-        if "before" not in request.url.params:
-            page = {"items": [item(2), item(1)], "next": "2026-11-01T12:01:00Z"}
+        if "cursor" not in request.url.params:
+            page = {"items": [item(2), item(1)], "next": "c1"}
             return httpx.Response(200, json=page)
         return httpx.Response(200, json={"items": [item(0)], "next": None})
 
@@ -128,4 +128,4 @@ def test_list_runs_follows_pages_and_parses_records():
     assert [r.run_id for r in runs] == ["r2", "r1", "r0"]
     assert runs[0].started_at == datetime(2026, 11, 1, 12, 2, tzinfo=UTC)
     assert seen[0] == {"limit": "200", "status": "running"}
-    assert seen[1]["before"] == "2026-11-01T12:01:00Z"
+    assert seen[1]["cursor"] == "c1"

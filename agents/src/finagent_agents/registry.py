@@ -13,8 +13,13 @@ PACKAGE_DIR = Path(__file__).parent
 DEFAULT_WORKFLOWS_FILE = PACKAGE_DIR / "workflows.yaml"
 DEFAULT_PROMPTS_DIR = PACKAGE_DIR / "prompts"
 
-DEFAULTS = {"model": "claude-opus-5-5", "effort": "medium", "max_tokens": 16000,
-            "timeout_s": 120, "max_concurrency": 4}
+DEFAULTS = {
+    "model": "claude-opus-5-5",
+    "effort": "medium",
+    "max_tokens": 16000,
+    "timeout_s": 120,
+    "max_concurrency": 4,
+}
 NODE_KEYS = {"model", "effort", "max_tokens", "prompt", "tools"}
 WORKFLOW_KEYS = {"graph", "input", "nodes", "timeout_s", "max_concurrency", "schedule"}
 INPUT_TYPES = {"str": str, "int": int, "float": float, "bool": bool, "list[str]": list[str]}
@@ -38,8 +43,12 @@ class NodeBinding:
     system: str = ""  # resolved prompt text
 
     def describe(self) -> dict:
-        return {"model": self.model, "effort": self.effort, "prompt": self.prompt,
-                "tools": list(self.tools)}
+        return {
+            "model": self.model,
+            "effort": self.effort,
+            "prompt": self.prompt,
+            "tools": list(self.tools),
+        }
 
 
 @dataclass(frozen=True)

@@ -16,7 +16,7 @@ Data layer for FinAgent: one shared store, the jobs that fill it (recon), and it
 
 ```bash
 python -m venv .venv && .venv\Scripts\activate
-pip install -e ".[dev]"
+pip install -e ".[dev]" -c constraints.txt   # pinned, tested versions
 cp .env.example .env        # set FINAGENT_SEC_USER_AGENT
 pytest
 recon run sec_tickers

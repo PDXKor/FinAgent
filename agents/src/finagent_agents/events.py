@@ -142,12 +142,22 @@ class EventPublisher(BaseCallbackHandler):
             parent = self._parents.get(parent)
         return self._span(parent)
 
-    def _start(self, run_id: UUID, parent: UUID | None, type: str, metadata, **data: Any) -> None:
+    def _start(
+        self,
+        run_id: UUID,
+        parent: UUID | None,
+        type: str,
+        metadata,
+        start_only: dict | None = None,
+        **data: Any,
+    ) -> None:
+        """Emit a start event. `data` repeats on the end event; `start_only` does not."""
         self._parents[run_id] = parent
         md = metadata or {}
         data = {"node": md.get("langgraph_node"), "path": _path(md), **data}
         self._open[run_id] = {"span": self._span(run_id), **data}
-        self.stream.emit(type, **self._open[run_id], parent=self._published_parent(parent))
+        extra = start_only or {}
+        self.stream.emit(type, **self._open[run_id], parent=self._published_parent(parent), **extra)
 
     def _end(self, run_id: UUID, type: str, **extra: Any) -> None:
         self._parents.pop(run_id, None)
@@ -191,9 +201,8 @@ class EventPublisher(BaseCallbackHandler):
         self, serialized, input_str, *, run_id, parent_run_id=None, metadata=None, inputs=None, **kw
     ):
         tool = kw.get("name") or (serialized or {}).get("name") or "tool"
-        self._start(run_id, parent_run_id, "tool_start", metadata, tool=tool)
-        # Input only on the start event; it is not repeated on the end event.
-        self.stream.history[-1].data["input"] = _clip(inputs if inputs else input_str)
+        start_only = {"input": _clip(inputs if inputs else input_str)}
+        self._start(run_id, parent_run_id, "tool_start", metadata, start_only, tool=tool)
 
     def on_tool_end(self, output, *, run_id, **kwargs):
         self._end(run_id, "tool_end", output=_clip(getattr(output, "content", output)))

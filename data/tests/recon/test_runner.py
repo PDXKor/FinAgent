@@ -243,3 +243,45 @@ def test_optional_request_404_is_skipped_without_error_or_raw_file(env, tmp_path
 def test_optional_request_still_fails_on_server_errors(env):
     e = env(lambda request: httpx.Response(500))
     assert e.runner.run(OptionalJob()).status == "failed"
+
+
+def test_raw_keep_retains_newest_responses_per_key(tmp_path):
+    from datetime import datetime
+
+    from finagent.data.raw import save_raw
+
+    for minute in range(5):
+        save_raw(tmp_path, "sec", "job", "k", b"x", datetime(2026, 11, 1, 12, minute), keep=2)
+    names = sorted(p.name for p in (tmp_path / "sec" / "job" / "k").iterdir())
+    assert names == ["20261101T120300.json", "20261101T120400.json"]
+
+
+class SnapshotJob(FakeJob):
+    """Each response lists every current company; missing ones are deleted."""
+
+    replace: ClassVar[tuple[str, ...]] = ("companies",)
+
+    def parse(self, req, body):
+        return {"companies": [{"cik": c, "name": c} for c in body.decode().split(",") if c]}
+
+
+def test_replace_tables_prune_rows_missing_from_snapshot(tmp_path):
+    bodies = iter([b"A,B,C,D", b"A,B,C"])
+    env = Env(tmp_path, lambda r: httpx.Response(200, content=next(bodies)))
+    env.runner.run(SnapshotJob())
+    res = env.runner.run(SnapshotJob())
+    assert res.status == "ok"
+    assert [r[0] for r in env.con.execute("SELECT cik FROM companies ORDER BY cik")] == [
+        "A",
+        "B",
+        "C",
+    ]
+
+
+def test_suspiciously_small_snapshot_is_refused(tmp_path):
+    bodies = iter([b"A,B,C,D,E", b"A"])
+    env = Env(tmp_path, lambda r: httpx.Response(200, content=next(bodies)))
+    env.runner.run(SnapshotJob())
+    res = env.runner.run(SnapshotJob())
+    assert res.status == "failed"
+    assert env.con.execute("SELECT count(*) FROM companies").fetchone()[0] == 5

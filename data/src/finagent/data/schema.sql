@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS source_state (
 CREATE TABLE IF NOT EXISTS agent_runs (
   run_id            VARCHAR PRIMARY KEY,
   workflow          VARCHAR,
-  status            VARCHAR,   -- running | ok | failed | timeout | cancelled
+  status            VARCHAR,   -- queued | running | ok | failed | timeout | cancelled
   inputs            VARCHAR,   -- JSON
   output            VARCHAR,   -- JSON
   error             VARCHAR,

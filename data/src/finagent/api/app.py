@@ -1,11 +1,13 @@
+import logging
 import secrets
 import sqlite3
-from collections.abc import Callable
-from contextlib import closing
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager, closing
 from datetime import datetime
 from typing import Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 
 from finagent.api.config import ApiSettings
@@ -23,15 +25,41 @@ from finagent.api.schemas import (
 from finagent.data.db import DatabaseLockedError, connect, is_locked
 from finagent.data.queries.agents import get_agent_run, list_agent_runs, save_agent_run
 from finagent.data.queries.fundamentals import get_financials
-from finagent.data.queries.ops import latest_ingest_runs, list_ingest_runs, table_counts
+from finagent.data.queries.ops import (
+    latest_ingest_runs,
+    list_ingest_runs,
+    mark_ingest_interrupted,
+    table_counts,
+)
 from finagent.data.queries.reference import get_company
+from finagent.data.timeutil import utcnow
 from finagent.recon.jobs import REGISTRY
 from finagent.recon.scheduler import DEFAULT_FILE, ScheduleError, load_schedule
+
+log = logging.getLogger(__name__)
 
 MAX_FINANCIAL_ROWS = 20
 MAX_INGEST_ROWS = 200
 MAX_AGENT_RUN_ROWS = 200
 RETRY_AFTER_S = "1"
+LOOPBACK = {"127.0.0.1", "localhost", "::1"}
+# Browsers label requests from other sites; the proxies add tokens, so refuse those outright.
+CROSS_SITE = {"cross-site", "same-site"}
+RUN_STATUS = Literal["queued", "running", "ok", "failed", "timeout", "cancelled"]
+
+
+def _cursor(started_at: datetime, run_id: str) -> str:
+    return f"{started_at.isoformat()}|{run_id}"
+
+
+def _parse_cursor(cursor: str) -> tuple[datetime, str]:
+    started, sep, run_id = cursor.rpartition("|")
+    try:
+        if not sep:
+            raise ValueError
+        return datetime.fromisoformat(started), run_id
+    except ValueError:
+        raise HTTPException(422, f"bad cursor {cursor!r}") from None
 
 
 def _recon_runner(settings: ApiSettings) -> Callable[[str], object]:
@@ -55,15 +83,42 @@ def create_app(
     connections must stay on the thread that made them. `run_job(name)` runs one recon job
     (blocking); tests pass a fake."""
     settings = settings or ApiSettings()
-    app = FastAPI(
-        title="FinAgentData",
-        version="1",
-        generate_unique_id_function=lambda route: route.name,  # clean generated client names
-    )
-    jobs = app.state.jobs = JobManager(run_job or _recon_runner(settings))
+    jobs = JobManager(run_job or _recon_runner(settings))
 
     def db() -> closing[sqlite3.Connection]:
         return closing(connect(settings.db_path, wait=settings.api_lock_wait))
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        if settings.api_token is None and settings.api_host not in LOOPBACK:
+            log.warning(
+                "FINAGENT_API_TOKEN is unset and the API listens on %s: anyone who can reach "
+                "the port can use it",
+                settings.api_host,
+            )
+        yield
+        # Job threads die with the process; don't leave this process's run marked running.
+        if (active := jobs.active) is not None:
+            with db() as con:
+                mark_ingest_interrupted(
+                    con, active.job, active.started_at, utcnow(), "interrupted: API stopped"
+                )
+
+    app = FastAPI(
+        title="FinAgentData",
+        version="1",
+        lifespan=lifespan,
+        generate_unique_id_function=lambda route: route.name,  # clean generated client names
+        openapi_url=None if settings.api_token else "/openapi.json",  # docs only when open
+    )
+    app.state.jobs = jobs
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.api_allowed_hosts)
+
+    @app.middleware("http")
+    async def same_site_only(request: Request, call_next):
+        if request.headers.get("sec-fetch-site") in CROSS_SITE:
+            return JSONResponse({"detail": "cross-site request refused"}, status_code=403)
+        return await call_next(request)
 
     def auth(authorization: str | None = Header(default=None)) -> None:
         if settings.api_token is None:
@@ -79,6 +134,7 @@ def create_app(
             return JSONResponse(
                 {"detail": "database busy"}, status_code=503, headers={"Retry-After": RETRY_AFTER_S}
             )
+        log.error("database error on %s %s", request.method, request.url.path, exc_info=e)
         return JSONResponse({"detail": "database error"}, status_code=500)
 
     v1 = "/v1"
@@ -113,15 +169,19 @@ def create_app(
     @app.get(f"{v1}/agent-runs", dependencies=deps)
     def agent_runs(
         workflow: str | None = None,
-        status: Literal["running", "ok", "failed", "timeout", "cancelled"] | None = None,
-        before: datetime | None = None,
+        status: RUN_STATUS | None = None,
+        cursor: str | None = None,
         limit: int = Query(50, ge=1, le=MAX_AGENT_RUN_ROWS),
     ) -> AgentRunPage:
-        """Newest first. Page with `before` = the previous page's `next`."""
+        """Newest first. Page with `cursor` = the previous page's `next`."""
+        after = _parse_cursor(cursor) if cursor else None
         with db() as con:
-            found = list_agent_runs(con, workflow, status, before, limit)
+            found = list_agent_runs(con, workflow, status, after, limit)
         items = [AgentRun(**r) for r in found]
-        return AgentRunPage(items=items, next=items[-1].started_at if len(items) == limit else None)
+        last = items[-1] if len(items) == limit else None
+        return AgentRunPage(
+            items=items, next=_cursor(last.started_at, last.run_id) if last else None
+        )
 
     @app.get(f"{v1}/agent-runs/{{run_id}}", dependencies=deps)
     def agent_run(run_id: str) -> AgentRun:

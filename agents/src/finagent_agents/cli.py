@@ -21,8 +21,14 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_parser("list", help="show workflows")
     run = sub.add_parser("run", help="run one workflow")
     run.add_argument("workflow")
-    run.add_argument("--input", "-i", action="append", default=[], metavar="KEY=VALUE",
-                     help="JSON value, or plain text for str inputs; repeatable")
+    run.add_argument(
+        "--input",
+        "-i",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="JSON value, or plain text for str inputs; repeatable",
+    )
     many = sub.add_parser("run-many", help="run a workflow once per JSONL line, concurrently")
     many.add_argument("workflow")
     many.add_argument("--inputs-file", required=True)
@@ -52,12 +58,16 @@ def _print_list(workflows: dict[str, Workflow]) -> None:
     for wf in workflows.values():
         print(f"{wf.name}  graph={wf.graph}  input={wf.input}  timeout={wf.timeout_s}s")
         for node, b in wf.nodes.items():
-            print(f"    {node}: {b.model} effort={b.effort} prompt={b.prompt} tools={list(b.tools)}")
+            print(
+                f"    {node}: {b.model} effort={b.effort} prompt={b.prompt} tools={list(b.tools)}"
+            )
 
 
 def _print_run(run: RunRecord) -> None:
-    print(f"[{run.status}] {run.workflow} {run.run_id} "
-          f"tokens in={run.input_tokens} out={run.output_tokens} cache_read={run.cache_read_tokens}")
+    print(
+        f"[{run.status}] {run.workflow} {run.run_id} "
+        f"tokens in={run.input_tokens} out={run.output_tokens} cache_read={run.cache_read_tokens}"
+    )
     print(run.output if run.status == "ok" else run.error)
 
 

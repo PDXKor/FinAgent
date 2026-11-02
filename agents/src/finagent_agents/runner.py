@@ -23,6 +23,8 @@ log = logging.getLogger(__name__)
 
 RECURSION_LIMIT = 25  # LangGraph steps per run; stops runaway tool loops
 INTERRUPTED = "interrupted: the agents process stopped before the run finished"
+SAVE_ATTEMPTS = 3  # final-result saves, on top of the data layer's own retries
+SAVE_BACKOFF_S = 1.0  # doubled per attempt
 
 
 class UsageCounter(BaseCallbackHandler):
@@ -74,7 +76,9 @@ class Runner:
         try:
             return self.workflows[name]
         except KeyError:
-            raise WorkflowError(f"unknown workflow {name!r}; known: {sorted(self.workflows)}") from None
+            raise WorkflowError(
+                f"unknown workflow {name!r}; known: {sorted(self.workflows)}"
+            ) from None
 
     async def run(self, name: str, inputs: dict) -> RunRecord:
         wf = self.workflow(name)
@@ -91,7 +95,7 @@ class Runner:
         return list(await asyncio.gather(*(one(i) for i in validated)))
 
     async def start(self, name: str, inputs: dict) -> RunRecord:
-        """Validate, save as running, execute in the background. Returns the running record."""
+        """Validate, save as queued, execute in the background. Returns the queued record."""
         wf = self.workflow(name)
         run = await self._begin(wf, wf.validate(inputs))
         task = asyncio.create_task(self._execute(wf, run), name=f"run-{run.run_id}")
@@ -118,6 +122,21 @@ class Runner:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
 
+    async def _save_final(self, run: RunRecord) -> None:
+        """The result exists only in memory until saved: retry, then log it before giving up."""
+        for attempt in range(SAVE_ATTEMPTS):
+            try:
+                await self.data.save_run(run)
+                return
+            except Exception:
+                if attempt == SAVE_ATTEMPTS - 1:
+                    log.error(
+                        "run %s not saved: status=%s error=%s output=%.2000r",
+                        run.run_id, run.status, run.error, run.output,
+                    )  # fmt: skip
+                    raise
+                await asyncio.sleep(SAVE_BACKOFF_S * 2**attempt)
+
     def _done(self, run_id: str, task: asyncio.Task) -> None:
         self._tasks.pop(run_id, None)
         if not task.cancelled() and (e := task.exception()) is not None:
@@ -136,7 +155,7 @@ class Runner:
             run_id=uuid4().hex,
             workflow=wf.name,
             inputs=inputs,
-            status="running",
+            status="queued",
             started_at=datetime.now(UTC),
             bindings=wf.describe(),
         )
@@ -157,6 +176,10 @@ class Runner:
         cap = self._caps.setdefault(wf.name, asyncio.Semaphore(wf.max_concurrency))
         try:
             async with cap, self._global:
+                run.status = "running"  # past the concurrency limits
+                await self.data.save_run(run)
+                if stream is not None:
+                    stream.emit("running")
                 graph = self._graph(wf)
                 invocation = graph.ainvoke({"inputs": run.inputs}, config)
                 out = await asyncio.wait_for(invocation, wf.timeout_s)
@@ -178,7 +201,7 @@ class Runner:
         run.cache_read_tokens = usage.cache_read_tokens
         run.finished_at = datetime.now(UTC)
         try:
-            await self.data.save_run(run)
+            await self._save_final(run)
         finally:
             if stream is not None:
                 stream.emit(
@@ -193,9 +216,9 @@ class Runner:
 
 
 async def mark_interrupted(data: DataLayer) -> int:
-    """Save runs a previous process left `running` as failed. Call at server start, before
-    any run begins; assumes one agents process per data store. Returns how many."""
-    stale = await data.list_runs(status="running")
+    """Save runs a previous process left `queued` or `running` as failed. Call at server start,
+    before any run begins; assumes one agents process per data store. Returns how many."""
+    stale = [r for s in ("queued", "running") for r in await data.list_runs(status=s)]
     now = datetime.now(UTC)
     for run in stale:
         await data.save_run(replace(run, status="failed", error=INTERRUPTED, finished_at=now))

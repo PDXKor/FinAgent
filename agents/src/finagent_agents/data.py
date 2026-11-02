@@ -26,7 +26,7 @@ class RunRecord:
     run_id: str
     workflow: str
     inputs: dict
-    status: str  # running | ok | failed | timeout | cancelled
+    status: str  # queued | running | ok | failed | timeout | cancelled
     started_at: datetime
     finished_at: datetime | None = None
     output: Any = None
@@ -146,14 +146,14 @@ class HttpDataLayer:
 
     async def list_runs(self, status: str | None = None, limit: int = 200) -> list[RunRecord]:
         runs: list[RunRecord] = []
-        before = None
+        cursor = None
         while len(runs) < limit:
             params = {"limit": min(MAX_PAGE, limit - len(runs))}
-            params |= {k: v for k, v in (("status", status), ("before", before)) if v}
+            params |= {k: v for k, v in (("status", status), ("cursor", cursor)) if v}
             r = await self._request("GET", "/agent-runs", params=params)
             r.raise_for_status()
             page = r.json()
             runs += [RunRecord.from_dict(d) for d in page["items"]]
-            if not (before := page["next"]):
+            if not (cursor := page["next"]):
                 break
         return runs

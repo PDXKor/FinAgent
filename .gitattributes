@@ -1,0 +1,2 @@
+# LF everywhere, including Windows working trees (tools and formatters expect it).
+* text=auto eol=lf

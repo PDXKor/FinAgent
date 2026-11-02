@@ -14,7 +14,7 @@ def load_ciks(con, path: str | Path) -> list[str]:
     if not path.exists():
         raise WatchlistError(f"watchlist not found: {path} (one ticker per line)")
     wanted = []
-    for line in path.read_text().splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         ticker = line.split("#")[0].strip().upper()
         if ticker and ticker not in wanted:
             wanted.append(ticker)

@@ -34,3 +34,13 @@ def list_ingest_runs(
 
 def table_counts(con: sqlite3.Connection, tables=COUNTED_TABLES) -> dict[str, int]:
     return {t: con.execute(f"SELECT count(*) FROM {t}").fetchone()[0] for t in tables}
+
+
+def mark_ingest_interrupted(con: sqlite3.Connection, job: str, since, now, reason: str) -> int:
+    """Fail `job`'s runs still `running` that started at or after `since` (naive UTC)."""
+    cur = con.execute(
+        "UPDATE ingest_runs SET status = 'failed', finished_at = ?, error_sample = ? "
+        "WHERE job = ? AND status = 'running' AND started_at >= ?",
+        [now, reason, job, since],
+    )
+    return cur.rowcount

@@ -13,8 +13,9 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 
 import httpx
-from fastapi import Depends, FastAPI, Header, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from finagent_agents.config import AgentSettings
@@ -27,6 +28,9 @@ from finagent_agents.runner import Runner, mark_interrupted
 log = logging.getLogger(__name__)
 
 KEEPALIVE_S = 15.0  # SSE comment ping during silence; keeps proxies from closing the stream
+LOOPBACK = {"127.0.0.1", "localhost", "::1"}
+# Browsers label requests from other sites; the proxies add tokens, so refuse those outright.
+CROSS_SITE = {"cross-site", "same-site"}
 
 
 class WorkflowInfo(BaseModel):
@@ -101,6 +105,12 @@ def create_app(
             events=hub,
         )
         app.state.runner, app.state.events = runner, hub
+        if settings.api_token is None and settings.api_host not in LOOPBACK:
+            log.warning(
+                "FINAGENT_AGENTS_API_TOKEN is unset and the API listens on %s: anyone who can "
+                "reach the port can start paid runs",
+                settings.api_host,
+            )
         try:
             if n := await mark_interrupted(store):
                 log.warning("marked %d interrupted run(s) failed", n)
@@ -118,7 +128,15 @@ def create_app(
         version="1",
         lifespan=lifespan,
         generate_unique_id_function=lambda route: route.name,
+        openapi_url=None if settings.api_token else "/openapi.json",  # docs only when open
     )
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.api_allowed_hosts)
+
+    @app.middleware("http")
+    async def same_site_only(request: Request, call_next):
+        if request.headers.get("sec-fetch-site") in CROSS_SITE:
+            return JSONResponse({"detail": "cross-site request refused"}, status_code=403)
+        return await call_next(request)
 
     def auth(authorization: str | None = Header(default=None)) -> None:
         if settings.api_token is None:
@@ -147,6 +165,8 @@ def create_app(
             raise HTTPException(404, str(e)) from None
         except InputError as e:
             raise HTTPException(422, str(e)) from None
+        except httpx.HTTPError as e:  # the run could not be recorded, so it never started
+            raise HTTPException(503, f"data API unavailable: {e}") from None
         return RunStarted(
             run_id=run.run_id, workflow=run.workflow, status=run.status, started_at=run.started_at
         )

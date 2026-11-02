@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  python:
+    name: ${{ matrix.package }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [data, agents]
+    defaults:
+      run:
+        working-directory: ${{ matrix.package }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -e ".[dev]" -c constraints.txt
+      - run: ruff check src tests
+      - run: ruff format --check src tests
+      - run: pytest -q  # live (paid) tests skip without ANTHROPIC_API_KEY
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "26.13.0"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  api-types:
+    name: frontend API types match backends
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "26.13.0"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install backends (separate venvs, each with its own pins)
+        run: |
+          python -m venv /tmp/data && /tmp/data/bin/pip install -c data/constraints.txt ./data
+          python -m venv /tmp/agents && /tmp/agents/bin/pip install -c agents/constraints.txt ./agents
+      - working-directory: frontend
+        env:
+          DATA_PYTHON: /tmp/data/bin/python
+          AGENTS_PYTHON: /tmp/agents/bin/python
+        run: |
+          npm ci
+          npm run gen:api
+          git diff --exit-code -- src/api/generated || {
+            echo "::error::Generated API types are stale. Run 'npm run gen:api' in frontend/ and commit."
+            exit 1
+          }
