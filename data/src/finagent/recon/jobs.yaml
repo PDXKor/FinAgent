@@ -1,0 +1,9 @@
+# Cron schedules (5 fields), evaluated in FINAGENT_SCHEDULE_TIMEZONE (default UTC).
+# Jobs run one at a time, so keep dependents after their inputs:
+# sec_tickers -> sec_submissions -> sec_companyfacts. sec_frames is independent (public float
+# changes only when 10-Ks are filed, so weekly is plenty).
+jobs:
+  sec_tickers:      { schedule: "0 6 * * *" }
+  sec_submissions:  { schedule: "0 7 * * 1-5" }
+  sec_companyfacts: { schedule: "0 8 * * 1-5" }
+  sec_frames:       { schedule: "0 5 * * 1" }

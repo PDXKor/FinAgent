@@ -1,0 +1,5 @@
+{"taxonomy":"dei","tag":"EntityPublicFloat","ccp":"CY2025Q2I","uom":"USD",
+ "label":"Entity Public Float","pts":3,"data":[
+ {"accn":"0001093691-26-000010","cik":1093691,"entityName":"PLUG POWER INC","loc":"US-NY","end":"2025-06-30","val":1500000000},
+ {"accn":"0000320193-25-000079","cik":320193,"entityName":"Apple Inc.","loc":"US-CA","end":"2025-03-28","val":3000000000000},
+ {"accn":"0001234567-26-000001","cik":1234567,"entityName":"Shell Co","loc":"US-NV","end":"2025-06-30","val":0}]}

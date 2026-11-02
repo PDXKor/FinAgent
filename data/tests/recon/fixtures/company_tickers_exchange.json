@@ -1,0 +1,7 @@
+{"fields":["cik","name","ticker","exchange"],"data":[
+ [320193,"Apple Inc.","AAPL","Nasdaq"],
+ [1067983,"BERKSHIRE HATHAWAY INC","BRK-B","NYSE"],
+ [1067983,"BERKSHIRE HATHAWAY INC","BRK-A","NYSE"],
+ [1318605,"Tesla, Inc.","TSLA","Nasdaq"],
+ [1234567,"Tiny OTC Co","TINY",null]
+]}
