@@ -26,11 +26,11 @@ Rules:
 
 | Concern | Choice | Why |
 |---|---|---|
-| Build | Vite + TypeScript (strict) | Fast, static output, dev proxy built in |
+| Build | Vite + TypeScript 5 (strict) | Fast, static output, dev proxy built in. TS 5 because openapi-typescript requires it |
 | UI | React 19 | Ecosystem; component libs |
-| Routing | TanStack Router | Typed routes and search params (filters live in the URL) |
+| Routing | TanStack Router (from the second page) | Typed routes and search params (filters live in the URL) |
 | Server state | TanStack Query | Cache, retry, polling; no global store needed |
-| Styling | Tailwind + shadcn/ui | Owned components, no runtime theme lib |
+| Styling | Tailwind 4; shadcn/ui when components outgrow hand-written ones | Owned components, no runtime theme lib |
 | Tables | TanStack Table | Sort/filter for screener and runs |
 | Charts | Recharts | Enough for annual bars/lines |
 | Markdown | react-markdown, no raw HTML | Briefs are LLM output; never render HTML from it |
@@ -38,47 +38,49 @@ Rules:
 | Tests | Vitest + Testing Library + MSW; Playwright e2e | Fake both APIs in unit tests |
 | Prod proxy | Caddy | One file, serves `dist/` and proxies |
 
-Prerequisite: Node 22 LTS (not installed on this machine yet).
+Prerequisite: Node LTS (v26; per-user install in `%LOCALAPPDATA%\Programs\nodejs`). Dependencies installed with `npm install --before=<date ≥ 2 weeks ago>`.
 
 ## Layout
 
+Built (ingestion):
 ```
 FinAgentFrontEnd/
-  design.md
-  package.json  vite.config.ts  tsconfig.json  Caddyfile  .env.example
+  package.json  vite.config.ts  tsconfig.json  .env.example
   src/
-    main.tsx  router.tsx
+    main.tsx  App.tsx  index.css
     api/
-      data.ts  agents.ts          # openapi-fetch clients, base /api/data, /api/agents
+      data.ts                     # openapi-fetch client (base /api/data), ApiError, unwrap
       generated/data.d.ts         # npm run gen:api (from :8765/openapi.json)
-      generated/agents.d.ts       # (from :8766/openapi.json)
       queries.ts                  # TanStack Query hooks; only place that calls clients
-      events.ts                   # SSE hook for live runs
-    routes/
-      index.tsx                   # dashboard
-      screener.tsx
-      companies.$ticker.tsx
-      workflows.tsx  workflows.$name.tsx
-      runs.tsx  runs.$runId.tsx
-      ops.tsx
-      watchlist.tsx
-    components/                   # ui/ (shadcn), RunStatus, MoneyCell, InputForm, Markdown, ...
-    lib/format.ts                 # money, %, ISO-UTC -> local
-  tests/  e2e/
+    pages/Ingestion.tsx (+ .test.tsx)
+    components/StatusBadge.tsx
+    lib/format.ts  useNow.ts
+    test/                         # MSW server, setup, render helper
+```
+
+Target adds:
+```
+  Caddyfile
+  src/
+    router.tsx
+    api/agents.ts  generated/agents.d.ts  events.ts   # FinAgent client, SSE hook
+    pages/  screener  company  workflows  runs  watchlist
+    components/ui/                                   # shadcn
+  e2e/
 ```
 
 ## Pages
 
 | Route | Shows | Actions | Backend calls |
 |---|---|---|---|
-| `/` | Last runs, ingest job status, table counts | — | data: runs list, ops |
+| `/` | Last runs, ingest job status, table counts | — | data: runs list, jobs |
 | `/screener` | `v_small_cap_candidates`; filter float range, exchange, SIC, location | Select tickers → run `screen_then_brief`; add to watchlist | data: screens; agents: start run |
 | `/companies/:ticker` | Profile, annual financials table + charts, recent filings, past briefs for ticker | Run `company_brief` | data: company, financials, filings, runs?ticker; agents: start run |
 | `/workflows` | Catalog: graph, inputs, node bindings (model, effort, prompt, tools), timeout, schedule | — | agents: workflows |
 | `/workflows/:name` | Form generated from input schema | Start run (confirm dialog shows models) | agents: start run |
 | `/runs` | Run history; filter workflow, status, ticker, date | — | data: runs list |
 | `/runs/:runId` | Status, inputs, bindings, tokens, duration, output (markdown) or error; live timeline while running | Cancel | data: run; agents: events, cancel |
-| `/ops` | Latest ingest run per job, schedule, table counts | — (trigger jobs: later) | data: ops |
+| `/ingestion` (built; `/` today) | Recon jobs in dependency order: status, schedule, last run numbers, errors; table counts; run history filtered by job | Run a job (one at a time) | data: jobs, ingest-runs, counts |
 | `/watchlist` | Tickers | Add/remove | data: watchlist |
 
 Input form: map workflow input types to controls — `str` text, `int`/`float` number, `bool` switch, `list[str]` ticker multi-select (typeahead from company search).
@@ -111,12 +113,15 @@ Input form: map workflow input types to controls — `str` text, `int`/`float` n
 | D2 | `GET /v1/companies?q=&limit=` — ticker/name prefix search | Typeahead |
 | D3 | `GET /v1/screens/small-caps?min_float=&max_float=&exchange=&sic=&location=&limit=&offset=` over `v_small_cap_candidates` | Screener |
 | D4 | `GET /v1/companies/{ticker}/filings?form=&limit=` over `v_recent_filings` | Company page |
-| D5 | `queries/ops.py`: latest `ingest_runs` per job + table counts; `GET /v1/ops/status`. `recon status` reuses it. | Ops page; removes SQL from CLI |
-| D6 | **Timestamp bug:** `agent_runs` stores naive UTC and the API returns it without offset; browsers parse that as local time. Serialize all datetimes as UTC with `Z` (schema-level serializer). | Correct times in UI |
+| D5 | **Done.** `queries/ops.py` (latest run per job, run list, table counts); `recon status` reuses it. | Ingestion page; removes SQL from CLI |
+| D6 | **Done.** Timestamps were sent without offset (browsers read them as local). `UtcDatetime` schema type now sends `Z`. | Correct times in UI |
 | D7 | Add `cancelled` to `AgentRunIn.status`. | Cancel support (A3) |
 | D8 | Watchlist moves to Curation: table `watchlist(ticker PK, added_at, note)`; `GET/PUT/DELETE /v1/watchlist[/{ticker}]`. Recon reads the table; `slice.txt` imported once. | Edit from UI; closes design open question |
-| D9 | Set FastAPI `generate_unique_id_function` to route name. | Clean generated client names |
-| D10 | Commit the `http-api` branch work (API, queries) and add a git remote. | UI depends on it |
+| D9 | **Done.** Operation ids = route names. | Clean generated client names |
+| D10 | Commit the `http-api` branch work (API, queries, jobs) and add a git remote. | UI depends on it |
+| D11 | **Done.** Recon job control: `GET /v1/jobs`, `POST /v1/jobs/{name}/runs` (background thread, one job at a time, `409` when busy), `GET /v1/ingest-runs`, `GET /v1/ops/counts`. `recon.pipeline.ingest` returns `RunResult` or raises. | Ingestion page |
+| D12 | Mark stale `running` ingest rows `failed` on API start (job threads die with the server). | No zombie "running elsewhere" rows |
+| D13 | Progress counters during a run (runner updates `requests`/`rows_written` every N requests). | Live progress for long jobs |
 
 List endpoints use `{items, next}`; existing bare-list endpoints stay as-is in `/v1` (additive only).
 
@@ -137,11 +142,12 @@ List endpoints use `{items, next}`; existing bare-list endpoints stay as-is in `
 
 | # | Scope | Depends on |
 |---|---|---|
-| F0 | Scaffold, Vite proxy, generated types, health badges for both APIs | Node install, D9, D10 |
-| F1 | Company page, screener, typeahead (read-only) | D2, D3, D4, D6 |
+| F0 | **Done.** Scaffold, Vite proxy, generated types, data API health badge | D9 |
+| F0.5 | **Done.** Ingestion page: run recon jobs, status, history, counts | D5, D6, D11 |
+| F1 | Router, company page, screener, typeahead (read-only) | D2, D3, D4 |
 | F2 | Runs list + detail (history, no live) | D1 |
 | F3 | Workflow catalog, generated forms, start run, live timeline, cancel | A1–A7, D7 |
-| F4 | Ops page, watchlist editing | D5, D8 |
+| F4 | Watchlist editing, ingest progress | D8, D12, D13 |
 | F5 | Caddy prod config, Playwright e2e, empty/error states | — |
 
 ## Test Plan
@@ -153,7 +159,7 @@ List endpoints use `{items, next}`; existing bare-list endpoints stay as-is in `
 | Capability | Until then |
 |---|---|
 | Persisted run events / trace | Live only; history shows final output and tokens |
-| Trigger recon jobs from UI | `recon run` CLI |
+| Reparse and schedule control from UI | `recon reparse` / `recon schedule` CLI |
 | Multi-user auth | Localhost only, proxy-held tokens |
 | Human-in-the-loop approvals | Needs persistent checkpointer in FinAgent |
 | Market prices | Float as market-cap proxy |
