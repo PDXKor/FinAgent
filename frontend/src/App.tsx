@@ -1,22 +1,31 @@
-import { useHealth } from "./api/queries";
-import Ingestion from "./pages/Ingestion";
+import { Link, Outlet } from "@tanstack/react-router";
 
-export default function App() {
+import { useHealth } from "./api/queries";
+
+const NAV = "text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100";
+const ACTIVE = "text-zinc-900 dark:text-zinc-100 font-medium";
+
+export default function Layout() {
   return (
     <div className="min-h-screen">
       <header className="border-b border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3">
           <div className="flex items-baseline gap-6">
             <span className="font-semibold tracking-tight">FinAgent</span>
-            <nav className="text-sm text-zinc-500">
-              <span className="text-zinc-900 dark:text-zinc-100">Ingestion</span>
+            <nav className="flex gap-4 text-sm">
+              <Link to="/" className={NAV} activeProps={{ className: ACTIVE }} activeOptions={{ exact: true }}>
+                Ingestion
+              </Link>
+              <Link to="/data" className={NAV} activeProps={{ className: ACTIVE }}>
+                Data viewer
+              </Link>
             </nav>
           </div>
           <HealthBadge />
         </div>
       </header>
-      <main className="mx-auto max-w-6xl px-4 py-6">
-        <Ingestion />
+      <main className="mx-auto max-w-7xl px-4 py-6">
+        <Outlet />
       </main>
     </div>
   );

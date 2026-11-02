@@ -87,3 +87,23 @@ class Job(BaseModel):
 class JobStarted(BaseModel):
     job: str
     started_at: UtcDatetime
+
+
+class ColumnInfo(BaseModel):
+    name: str
+    type: str | None = None  # declared SQLite type; views may have none
+
+
+class TableInfo(BaseModel):
+    name: str
+    kind: Literal["table", "view"]
+    columns: list[ColumnInfo]
+
+
+class TableRows(BaseModel):
+    table: str
+    columns: list[ColumnInfo]
+    rows: list[dict[str, Any]]  # values as stored: ISO text dates, JSON columns as text
+    total: int  # rows matching the filters
+    limit: int
+    offset: int

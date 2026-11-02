@@ -35,3 +35,16 @@ export function formatAgo(iso: string | null | undefined, now = Date.now()): str
   if (s < 86_400) return `${Math.floor(s / 3_600)}h ago`;
   return `${Math.floor(s / 86_400)}d ago`;
 }
+
+const decimal = new Intl.NumberFormat(undefined, { maximumFractionDigits: 4 });
+
+/** Any stored value as display text. Integers under 10,000 stay ungrouped (years, counts). */
+export function formatCell(v: unknown): string {
+  if (v == null) return EMPTY;
+  if (typeof v === "number") {
+    if (!Number.isInteger(v)) return decimal.format(v);
+    return Math.abs(v) >= 10_000 ? integer.format(v) : String(v);
+  }
+  if (typeof v === "object") return JSON.stringify(v);
+  return String(v);
+}

@@ -19,17 +19,44 @@ def latest_ingest_runs(con: sqlite3.Connection) -> list[dict]:
     )
 
 
+# Sort keys -> SQL. Duration is derived; unfinished runs sort last either way.
+RUN_SORTS = {
+    "started_at": "started_at",
+    "job": "job",
+    "status": "status",
+    "requests": "requests",
+    "rows_written": "rows_written",
+    "errors": "errors",
+    "duration": "julianday(finished_at) - julianday(started_at)",
+}
+
+
 def list_ingest_runs(
-    con: sqlite3.Connection, job: str | None = None, limit: int = 50
+    con: sqlite3.Connection,
+    job: str | None = None,
+    limit: int = 50,
+    status: str | None = None,
+    since=None,
+    until=None,
+    sort: str = "started_at",
+    order: str = "desc",
 ) -> list[dict]:
-    """Recent runs, newest first, optionally for one job."""
-    where, params = ("WHERE job = ?", [job]) if job else ("", [])
-    return rows(
-        con.execute(
-            f"SELECT {RUN_COLUMNS} FROM ingest_runs {where} ORDER BY started_at DESC LIMIT ?",
-            [*params, limit],
-        )
-    )
+    """Runs filtered by job, status and start time (`since` inclusive, `until` exclusive; naive
+    UTC), sorted by a RUN_SORTS key. Nulls last; ties newest first."""
+    if sort not in RUN_SORTS or order not in ("asc", "desc"):
+        raise ValueError(f"bad sort {sort!r} {order!r}")
+    where, params = [], []
+    for clause, value in (
+        ("job = ?", job), ("status = ?", status), ("started_at >= ?", since), ("started_at < ?", until)
+    ):  # fmt: skip
+        if value is not None:
+            where.append(clause)
+            params.append(value)
+    sql = f"SELECT {RUN_COLUMNS} FROM ingest_runs"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += f" ORDER BY {RUN_SORTS[sort]} {order.upper()} NULLS LAST, started_at DESC LIMIT ?"
+    return rows(con.execute(sql, [*params, limit]))
 
 
 def table_counts(con: sqlite3.Connection, tables=COUNTED_TABLES) -> dict[str, int]:

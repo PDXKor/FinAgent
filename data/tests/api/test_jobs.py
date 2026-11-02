@@ -160,3 +160,27 @@ def test_shutdown_marks_this_process_running_job_interrupted(db_path):
     other = con.execute("SELECT status FROM ingest_runs WHERE run_id = 'b'").fetchone()[0]
     con.close()
     assert other == "running"  # sec_tickers' row was not started by this process
+
+
+def test_ingest_runs_filter_by_status_and_time(db_path):
+    _, c = make(db_path, FakeRunner())
+    got = c.get("/v1/ingest-runs", params={"status": "ok"}).json()
+    assert [r["run_id"] for r in got] == ["a"]
+    since = c.get("/v1/ingest-runs", params={"since": "2026-11-01T10:30:00Z"}).json()
+    assert [r["run_id"] for r in since] == ["b"]
+    until = c.get("/v1/ingest-runs", params={"until": "2026-11-01T10:00:00Z"}).json()
+    assert [r["run_id"] for r in until] == ["c"]
+    assert c.get("/v1/ingest-runs?status=weird").status_code == 422
+
+
+def test_ingest_runs_sorting(db_path):
+    _, c = make(db_path, FakeRunner())
+
+    def ids(**params):
+        return [r["run_id"] for r in c.get("/v1/ingest-runs", params=params).json()]
+
+    assert ids() == ["b", "a", "c"]  # newest first by default
+    assert ids(sort="started_at", order="asc") == ["c", "a", "b"]
+    assert ids(sort="duration", order="desc") == ["c", "a", "b"]  # 60s, 5s, unfinished last
+    assert ids(sort="rows_written", order="asc") == ["c", "a", "b"]  # 5, 10, null last
+    assert c.get("/v1/ingest-runs?sort=nope").status_code == 422

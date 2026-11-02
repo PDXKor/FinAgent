@@ -140,8 +140,52 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Ingest Runs */
+        /**
+         * Ingest Runs
+         * @description Filter by job, status, start time (`since` inclusive, `until` exclusive); sort by any
+         *     column or `duration`.
+         */
         get: operations["ingest_runs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/tables": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Tables
+         * @description Every table and view with its columns, for the data viewer.
+         */
+        get: operations["tables"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/tables/{name}/rows": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Table Rows
+         * @description One page of a table or view. Filters are ANDed; `null`/`notnull` ignore the value.
+         */
+        get: operations["table_rows"];
         put?: never;
         post?: never;
         delete?: never;
@@ -313,6 +357,13 @@ export interface components {
             /** Filed Date */
             filed_date?: string | null;
         };
+        /** ColumnInfo */
+        ColumnInfo: {
+            /** Name */
+            name: string;
+            /** Type */
+            type?: string | null;
+        };
         /** Company */
         Company: {
             /** Ticker */
@@ -385,6 +436,35 @@ export interface components {
              * Format: date-time
              */
             started_at: string;
+        };
+        /** TableInfo */
+        TableInfo: {
+            /** Name */
+            name: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "table" | "view";
+            /** Columns */
+            columns: components["schemas"]["ColumnInfo"][];
+        };
+        /** TableRows */
+        TableRows: {
+            /** Table */
+            table: string;
+            /** Columns */
+            columns: components["schemas"]["ColumnInfo"][];
+            /** Rows */
+            rows: {
+                [key: string]: unknown;
+            }[];
+            /** Total */
+            total: number;
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
         };
         /** ValidationError */
         ValidationError: {
@@ -681,6 +761,11 @@ export interface operations {
         parameters: {
             query?: {
                 job?: string | null;
+                status?: ("running" | "ok" | "partial" | "failed") | null;
+                since?: string | null;
+                until?: string | null;
+                sort?: "started_at" | "job" | "status" | "requests" | "rows_written" | "errors" | "duration";
+                order?: "asc" | "desc";
                 limit?: number;
             };
             header?: {
@@ -698,6 +783,77 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IngestRun"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    tables: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TableInfo"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    table_rows: {
+        parameters: {
+            query?: {
+                /** @description column:op:value, repeatable. ops: contains, eq, gt, gte, lt, lte, ne, notnull, null, starts */
+                filter?: string[] | null;
+                sort?: string | null;
+                order?: "asc" | "desc";
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TableRows"];
                 };
             };
             /** @description Validation Error */

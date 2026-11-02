@@ -2,7 +2,7 @@
 
 Web UI for FinAgent. Design: [design.md](design.md).
 
-Today: the **Ingestion** page runs recon jobs and shows their status and history.
+Pages: **Ingestion** (run recon jobs; filter and sort run history) and **Data viewer** (browse any table or view with filters, sorting, paging). Page state lives in the URL, so views can be bookmarked.
 
 ## Run
 

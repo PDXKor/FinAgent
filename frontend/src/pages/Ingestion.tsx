@@ -1,11 +1,22 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { getRouteApi } from "@tanstack/react-router";
+import { useEffect, useRef } from "react";
 
 import type { IngestRun, Job } from "../api/data";
 import { useCounts, useIngestRuns, useJobs, useStartJob } from "../api/queries";
 import StatusBadge, { toStatus, type Status } from "../components/StatusBadge";
+import { Banner, BUTTON, BUTTON_QUIET, Field, INPUT, SectionTitle, Table, Td, Th } from "../components/ui";
 import { EMPTY, formatAgo, formatCount, formatDateTime, formatElapsed } from "../lib/format";
+import {
+  dayStart,
+  RUN_LIMITS,
+  RUN_STATUSES,
+  type RunSort,
+  type RunsSearch,
+} from "../lib/search";
 import { useNow } from "../lib/useNow";
+
+const route = getRouteApi("/");
 
 /** Badge state for a job: its own process state first, then its last run record. */
 export function jobStatus(job: Job): Status {
@@ -16,16 +27,14 @@ export function jobStatus(job: Job): Status {
 }
 
 /** A `running` record is live only if this API is running that job now. */
-function runStatus(run: IngestRun, active: Job | undefined, latestOfActive?: string): Status {
+function runStatus(run: IngestRun, active: Job | undefined): Status {
   if (run.status !== "running") return toStatus(run.status);
-  return active && run.run_id === latestOfActive ? "running" : "external";
+  return active && run.run_id === active.last_run?.run_id ? "running" : "external";
 }
 
 export default function Ingestion() {
   const jobs = useJobs();
   const active = jobs.data?.find((j) => j.running);
-  const [filter, setFilter] = useState<string>("");
-  const runs = useIngestRuns(filter || undefined, !!active);
   const counts = useCounts(!!active);
   const start = useStartJob();
   const now = useNow(!!active);
@@ -47,8 +56,20 @@ export default function Ingestion() {
           <Banner>{jobs.error.message}</Banner>
         ) : (
           <Table
-            head={["Job", "Status", "Last run", "Duration", "Requests", "Rows", "Errors", ""]}
+            columns={8}
             loading={jobs.isPending}
+            head={
+              <>
+                <Th>Job</Th>
+                <Th>Status</Th>
+                <Th>Last run</Th>
+                <Th num>Duration</Th>
+                <Th num>Requests</Th>
+                <Th num>Rows</Th>
+                <Th num>Errors</Th>
+                <Th>{""}</Th>
+              </>
+            }
           >
             {jobs.data?.map((job) => (
               <JobRow
@@ -79,58 +100,170 @@ export default function Ingestion() {
         </div>
       </section>
 
-      <section>
-        <div className="flex items-end justify-between gap-4">
-          <SectionTitle title="Recent runs" />
+      <RecentRuns jobs={jobs.data ?? []} active={active} now={now} />
+    </div>
+  );
+}
+
+const RUN_COLUMNS: { label: string; sort?: RunSort; num?: boolean }[] = [
+  { label: "Started", sort: "started_at" },
+  { label: "Job", sort: "job" },
+  { label: "Status", sort: "status" },
+  { label: "Duration", sort: "duration", num: true },
+  { label: "Requests", sort: "requests", num: true },
+  { label: "Rows", sort: "rows_written", num: true },
+  { label: "Errors", sort: "errors", num: true },
+  { label: "Error" },
+];
+
+function RecentRuns({ jobs, active, now }: { jobs: Job[]; active?: Job; now: number }) {
+  const search = route.useSearch();
+  const navigate = route.useNavigate();
+  const set = (patch: Partial<RunsSearch>) =>
+    navigate({ search: (prev) => ({ ...prev, ...patch }), replace: true });
+
+  const sort = search.sort ?? "started_at";
+  const order = search.order ?? "desc";
+  const runs = useIngestRuns(
+    {
+      job: search.job,
+      status: search.status,
+      since: search.from ? dayStart(search.from) : undefined,
+      until: search.to ? dayStart(search.to, true) : undefined,
+      sort,
+      order,
+      limit: search.limit ?? RUN_LIMITS[0],
+    },
+    !!active,
+  );
+  const filtered = !!(search.job || search.status || search.from || search.to);
+
+  // Header click: new column -> descending (newest/largest first), then flip.
+  const sortBy = (column: RunSort) =>
+    set({ sort: column, order: sort === column && order === "desc" ? "asc" : "desc" });
+
+  return (
+    <section>
+      <SectionTitle title="Recent runs" />
+      <div className="mb-3 flex flex-wrap items-end gap-3">
+        <Field label="Job">
           <select
             aria-label="Filter by job"
-            className="mb-3 rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
+            className={INPUT}
+            value={search.job ?? ""}
+            onChange={(e) => set({ job: e.target.value || undefined })}
           >
             <option value="">All jobs</option>
-            {jobs.data?.map((j) => (
+            {jobs.map((j) => (
               <option key={j.name} value={j.name}>
                 {j.name}
               </option>
             ))}
           </select>
-        </div>
-        {runs.isError ? (
-          <Banner>{runs.error.message}</Banner>
-        ) : (
-          <Table
-            head={["Started", "Job", "Status", "Duration", "Requests", "Rows", "Errors", "Error"]}
-            loading={runs.isPending}
-            empty={runs.data?.length === 0 ? "No runs yet." : undefined}
+        </Field>
+        <Field label="Status">
+          <select
+            aria-label="Filter by status"
+            className={INPUT}
+            value={search.status ?? ""}
+            onChange={(e) =>
+              set({ status: (e.target.value || undefined) as RunsSearch["status"] })
+            }
           >
-            {runs.data?.map((run) => (
-              <tr key={run.run_id}>
-                <Td title={run.started_at}>{formatDateTime(run.started_at)}</Td>
-                <Td mono>{run.job}</Td>
-                <Td>
-                  <StatusBadge
-                    status={runStatus(run, active, active?.last_run?.run_id)}
-                  />
-                </Td>
-                <Td num>{formatElapsed(run.started_at, run.finished_at, now)}</Td>
-                <Td num>{formatCount(run.requests)}</Td>
-                <Td num>{formatCount(run.rows_written)}</Td>
-                <Td num>{formatCount(run.errors)}</Td>
-                <Td>
-                  <span
-                    className="block max-w-xs truncate text-red-700 dark:text-red-400"
-                    title={run.error_sample ?? undefined}
-                  >
-                    {run.error_sample ?? ""}
-                  </span>
-                </Td>
-              </tr>
+            <option value="">Any status</option>
+            {RUN_STATUSES.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
             ))}
-          </Table>
+          </select>
+        </Field>
+        <Field label="From">
+          <input
+            type="date"
+            aria-label="Started from"
+            className={INPUT}
+            value={search.from ?? ""}
+            max={search.to}
+            onChange={(e) => set({ from: e.target.value || undefined })}
+          />
+        </Field>
+        <Field label="To">
+          <input
+            type="date"
+            aria-label="Started to"
+            className={INPUT}
+            value={search.to ?? ""}
+            min={search.from}
+            onChange={(e) => set({ to: e.target.value || undefined })}
+          />
+        </Field>
+        <Field label="Show">
+          <select
+            aria-label="Rows to show"
+            className={INPUT}
+            value={search.limit ?? RUN_LIMITS[0]}
+            onChange={(e) => set({ limit: Number(e.target.value) })}
+          >
+            {RUN_LIMITS.map((n) => (
+              <option key={n} value={n}>
+                {n} rows
+              </option>
+            ))}
+          </select>
+        </Field>
+        {(filtered || search.sort) && (
+          <button
+            type="button"
+            className={BUTTON_QUIET}
+            onClick={() => navigate({ search: {}, replace: true })}
+          >
+            Clear
+          </button>
         )}
-      </section>
-    </div>
+      </div>
+      {runs.isError ? (
+        <Banner>{runs.error.message}</Banner>
+      ) : (
+        <Table
+          columns={RUN_COLUMNS.length}
+          loading={runs.isPending}
+          empty={runs.data?.length === 0 ? (filtered ? "No runs match." : "No runs yet.") : undefined}
+          head={RUN_COLUMNS.map((c) => (
+            <Th
+              key={c.label}
+              num={c.num}
+              sorted={c.sort === sort ? order : undefined}
+              onSort={c.sort ? () => sortBy(c.sort!) : undefined}
+            >
+              {c.label}
+            </Th>
+          ))}
+        >
+          {runs.data?.map((run) => (
+            <tr key={run.run_id}>
+              <Td title={run.started_at}>{formatDateTime(run.started_at)}</Td>
+              <Td mono>{run.job}</Td>
+              <Td>
+                <StatusBadge status={runStatus(run, active)} />
+              </Td>
+              <Td num>{formatElapsed(run.started_at, run.finished_at, now)}</Td>
+              <Td num>{formatCount(run.requests)}</Td>
+              <Td num>{formatCount(run.rows_written)}</Td>
+              <Td num>{formatCount(run.errors)}</Td>
+              <Td>
+                <span
+                  className="block max-w-xs truncate text-red-700 dark:text-red-400"
+                  title={run.error_sample ?? undefined}
+                >
+                  {run.error_sample ?? ""}
+                </span>
+              </Td>
+            </tr>
+          ))}
+        </Table>
+      )}
+    </section>
   );
 }
 
@@ -172,7 +305,7 @@ function JobRow(props: {
             disabled={disabled}
             title={disabled ? busyReason : `Run ${job.name} now`}
             aria-label={`Run ${job.name}`}
-            className="rounded-md bg-zinc-900 px-3 py-1 text-sm font-medium text-white hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+            className={BUTTON}
           >
             {job.running ? "Running…" : "Run"}
           </button>
@@ -197,74 +330,4 @@ function useRefreshWhenJobEnds(active: boolean) {
     if (was.current && !active) qc.invalidateQueries({ queryKey: ["data"] });
     was.current = active;
   }, [active, qc]);
-}
-
-function SectionTitle({ title, note }: { title: string; note?: string }) {
-  return (
-    <div className="mb-3">
-      <h2 className="text-base font-semibold">{title}</h2>
-      {note && <p className="text-sm text-zinc-500">{note}</p>}
-    </div>
-  );
-}
-
-function Banner({ children, onClose }: { children: ReactNode; onClose?: () => void }) {
-  return (
-    <div
-      role="alert"
-      className="mb-3 flex items-start justify-between gap-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-300"
-    >
-      <span>{children}</span>
-      {onClose && (
-        <button type="button" onClick={onClose} aria-label="Dismiss" className="font-medium">
-          ×
-        </button>
-      )}
-    </div>
-  );
-}
-
-const NUMERIC = new Set(["Duration", "Requests", "Rows", "Errors"]); // right-aligned headers
-
-function Table(props:{ head: string[]; loading?: boolean; empty?: string; children: ReactNode }) {
-  const { head, loading, empty, children } = props;
-  return (
-    <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
-      <table className="w-full text-left text-sm">
-        <thead className="border-b border-zinc-200 text-xs text-zinc-500 dark:border-zinc-800">
-          <tr>
-            {head.map((h, i) => (
-              <th
-                key={i}
-                className={`px-3 py-2 font-medium whitespace-nowrap ${NUMERIC.has(h) ? "text-right" : ""}`}
-              >
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-          {loading || empty ? (
-            <tr>
-              <td colSpan={head.length} className="px-3 py-6 text-center text-zinc-500">
-                {loading ? "Loading…" : empty}
-              </td>
-            </tr>
-          ) : (
-            children
-          )}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function Td(props: { children: ReactNode; num?: boolean; mono?: boolean; title?: string }) {
-  const { children, num, mono, title } = props;
-  const cls = num ? "text-right tabular-nums" : mono ? "font-mono" : "";
-  return (
-    <td className={`px-3 py-2 whitespace-nowrap ${cls}`} title={title}>
-      {children}
-    </td>
-  );
 }

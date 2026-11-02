@@ -28,7 +28,7 @@ Rules:
 |---|---|---|
 | Build | Vite + TypeScript 5 (strict) | Fast, static output, dev proxy built in. TS 5 because openapi-typescript requires it |
 | UI | React 19 | Ecosystem; component libs |
-| Routing | TanStack Router (from the second page) | Typed routes and search params (filters live in the URL) |
+| Routing | TanStack Router (code-based, `router.tsx`) | Typed routes; page state (filters, sort, paging) lives in the URL |
 | Server state | TanStack Query | Cache, retry, polling; no global store needed |
 | Styling | Tailwind 4; shadcn/ui when components outgrow hand-written ones | Owned components, no runtime theme lib |
 | Tables | TanStack Table | Sort/filter for screener and runs |
@@ -52,17 +52,16 @@ frontend/
       data.ts                     # openapi-fetch client (base /api/data), ApiError, unwrap
       generated/data.d.ts         # npm run gen:api (from :8765/openapi.json)
       queries.ts                  # TanStack Query hooks; only place that calls clients
-    pages/Ingestion.tsx (+ .test.tsx)
-    components/StatusBadge.tsx
-    lib/format.ts  useNow.ts
+    router.tsx                    # routes; URL search parsed by lib/search.ts
+    pages/Ingestion.tsx  DataViewer.tsx (+ tests)
+    components/StatusBadge.tsx  ui.tsx
+    lib/format.ts  search.ts  useNow.ts
     test/                         # MSW server, setup, render helper
 ```
 
 Target adds:
 ```
-  Caddyfile
   src/
-    router.tsx
     api/agents.ts  generated/agents.d.ts  events.ts   # FinAgent client, SSE hook
     pages/  screener  company  workflows  runs  watchlist
     components/ui/                                   # shadcn
@@ -80,7 +79,8 @@ Target adds:
 | `/workflows/:name` | Form generated from input schema | Start run (confirm dialog shows models) | agents: start run |
 | `/runs` | Run history; filter workflow, status, ticker, date | — | data: runs list |
 | `/runs/:runId` | Status, inputs, bindings, tokens, duration, output (markdown) or error; live timeline while running | Cancel | data: run; agents: events, cancel |
-| `/ingestion` (built; `/` today) | Recon jobs in dependency order: status, schedule, last run numbers, errors; table counts; run history filtered by job | Run a job (one at a time) | data: jobs, ingest-runs, counts |
+| `/` Ingestion (built) | Recon jobs in dependency order: status, schedule, last run numbers, errors; table counts; run history with job/status/date filters and sortable columns | Run a job (one at a time) | data: jobs, ingest-runs, counts |
+| `/data` Data viewer (built) | Any table or view: column filters (chips), header sort, paging, page size | — | data: tables, tables/{name}/rows |
 | `/watchlist` | Tickers | Add/remove | data: watchlist |
 
 Input form: map workflow input types to controls — `str` text, `int`/`float` number, `bool` switch, `list[str]` ticker multi-select (typeahead from company search).

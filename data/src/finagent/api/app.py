@@ -3,8 +3,8 @@ import secrets
 import sqlite3
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, closing
-from datetime import datetime
-from typing import Literal
+from datetime import UTC, datetime
+from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -21,9 +21,12 @@ from finagent.api.schemas import (
     IngestRun,
     Job,
     JobStarted,
+    TableInfo,
+    TableRows,
 )
 from finagent.data.db import DatabaseLockedError, connect, is_locked
 from finagent.data.queries.agents import get_agent_run, list_agent_runs, save_agent_run
+from finagent.data.queries.browse import OPS, BrowseError, browse, list_tables
 from finagent.data.queries.fundamentals import get_financials
 from finagent.data.queries.ops import (
     latest_ingest_runs,
@@ -41,11 +44,20 @@ log = logging.getLogger(__name__)
 MAX_FINANCIAL_ROWS = 20
 MAX_INGEST_ROWS = 200
 MAX_AGENT_RUN_ROWS = 200
+MAX_BROWSE_ROWS = 500
+FILTER_HELP = "column:op:value, repeatable. ops: " + ", ".join(sorted(OPS))
 RETRY_AFTER_S = "1"
 LOOPBACK = {"127.0.0.1", "localhost", "::1"}
 # Browsers label requests from other sites; the proxies add tokens, so refuse those outright.
 CROSS_SITE = {"cross-site", "same-site"}
 RUN_STATUS = Literal["queued", "running", "ok", "failed", "timeout", "cancelled"]
+
+
+def _naive_utc(t: datetime | None) -> datetime | None:
+    """Request times may carry an offset; the store holds naive UTC."""
+    if t is None or t.tzinfo is None:
+        return t
+    return t.astimezone(UTC).replace(tzinfo=None)
 
 
 def _cursor(started_at: datetime, run_id: str) -> str:
@@ -225,10 +237,54 @@ def create_app(
 
     @app.get(f"{v1}/ingest-runs", dependencies=deps)
     def ingest_runs(
-        job: str | None = None, limit: int = Query(50, ge=1, le=MAX_INGEST_ROWS)
+        job: str | None = None,
+        status: Literal["running", "ok", "partial", "failed"] | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        sort: Literal[
+            "started_at", "job", "status", "requests", "rows_written", "errors", "duration"
+        ] = "started_at",
+        order: Literal["asc", "desc"] = "desc",
+        limit: int = Query(50, ge=1, le=MAX_INGEST_ROWS),
     ) -> list[IngestRun]:
+        """Filter by job, status, start time (`since` inclusive, `until` exclusive); sort by any
+        column or `duration`."""
+        bounds = [_naive_utc(t) for t in (since, until)]
         with db() as con:
-            return [IngestRun(**r) for r in list_ingest_runs(con, job, limit)]
+            found = list_ingest_runs(con, job, limit, status, *bounds, sort=sort, order=order)
+        return [IngestRun(**r) for r in found]
+
+    @app.get(f"{v1}/tables", dependencies=deps)
+    def tables() -> list[TableInfo]:
+        """Every table and view with its columns, for the data viewer."""
+        with db() as con:
+            return [TableInfo(**t) for t in list_tables(con)]
+
+    @app.get(f"{v1}/tables/{{name}}/rows", dependencies=deps)
+    def table_rows(
+        name: str,
+        filter: Annotated[list[str] | None, Query(description=FILTER_HELP)] = None,
+        sort: str | None = None,
+        order: Literal["asc", "desc"] = "asc",
+        limit: int = Query(50, ge=1, le=MAX_BROWSE_ROWS),
+        offset: int = Query(0, ge=0),
+    ) -> TableRows:
+        """One page of a table or view. Filters are ANDed; `null`/`notnull` ignore the value."""
+        parsed = []
+        for f in filter or []:
+            col, sep, rest = f.partition(":")
+            op, _, value = rest.partition(":")
+            if not sep or not op:
+                raise HTTPException(422, f"filter {f!r} must be column:op:value")
+            parsed.append((col, op, value))
+        try:
+            with db() as con:
+                page = browse(con, name, parsed, sort, order, limit, offset)
+        except KeyError:
+            raise HTTPException(404, f"unknown table {name!r}") from None
+        except BrowseError as e:
+            raise HTTPException(422, str(e)) from None
+        return TableRows(**page, limit=limit, offset=offset)
 
     @app.get(f"{v1}/ops/counts", dependencies=deps)
     def counts() -> dict[str, int]:

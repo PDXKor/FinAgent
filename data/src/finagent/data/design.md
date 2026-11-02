@@ -36,7 +36,7 @@ Now:
 ```
 src/finagent/
   data/     db.py  raw.py  schema.sql  views.sql  timeutil.py
-            queries/  reference.py  fundamentals.py  agents.py  ops.py
+            queries/  reference.py  fundamentals.py  agents.py  ops.py  browse.py
   recon/    jobs/  runner.py  pipeline.py  scheduler.py  cli.py
   api/      app.py  schemas.py  config.py  cli.py  jobs.py   # HTTP service over queries/ + recon jobs
 ```
@@ -71,7 +71,9 @@ FinAgent / FrontEnd ──HTTP /v1──► finagent.api ──► data.queries 
 | GET | `/v1/agent-runs/{run_id}` | `agents.get_agent_run` |
 | GET | `/v1/jobs` | recon `REGISTRY` + `jobs.yaml` + `ops.latest_ingest_runs` |
 | POST | `/v1/jobs/{name}/runs` | starts `recon.pipeline.ingest` in a thread; `202`, `409` if any job runs |
-| GET | `/v1/ingest-runs?job=&limit=50` | `ops.list_ingest_runs` (limit ≤ 200) |
+| GET | `/v1/ingest-runs?job=&status=&since=&until=&sort=&order=&limit=50` | `ops.list_ingest_runs`: sort by any column or `duration`, nulls last (limit ≤ 200) |
+| GET | `/v1/tables` | `browse.list_tables`: tables and views with columns |
+| GET | `/v1/tables/{name}/rows?filter=col:op:value&sort=&order=&limit=&offset=` | `browse.browse`: read-only page + filtered total (limit ≤ 500) |
 | GET | `/v1/ops/counts` | `ops.table_counts` |
 
 - **Contract:** `api/schemas.py`. Add fields freely; breaking changes go to `/v2`.
@@ -81,6 +83,7 @@ FinAgent / FrontEnd ──HTTP /v1──► finagent.api ──► data.queries 
 - **Auth:** binds `127.0.0.1`. `FINAGENT_API_TOKEN` set → bearer token required and `/docs` off; blank = no auth (compose passes unset vars as empty; a warning is logged when not bound to loopback).
 - **Browser safety:** cross-site browser requests (`Sec-Fetch-Site: cross-site|same-site`) get `403`; `Host` must be in `FINAGENT_API_ALLOWED_HOSTS` (default `localhost`, `127.0.0.1`; add `data` in containers).
 - **Errors:** unexpected SQLite errors are logged and return `500`.
+- **Table browser:** table/column names are checked against `sqlite_master`/`PRAGMA table_info`; values are bound. Ops: `eq ne lt lte gt gte contains starts null notnull` (filters ANDed; numeric-looking values compare as numbers; `contains`/`starts` case-insensitive, wildcards literal).
 - **Run:** `finagent-data serve` (`FINAGENT_API_HOST`, `FINAGENT_API_PORT`, default 8765). Container: `data/Dockerfile`, state in `/data`, binds 0.0.0.0 inside the compose network.
 - **Timestamps:** stored naive UTC; the API sends them with `Z`.
 - **Jobs:** one at a time per API process (`api/jobs.py`); progress and results are `ingest_runs` rows. Waits `FINAGENT_JOB_LOCK_WAIT` (30s) for the writer lock. Needs `FINAGENT_SEC_USER_AGENT`. The API does not run the scheduler. On shutdown, the job this process started is marked `failed: interrupted` (a hard kill still leaves `running`). This makes `api` depend on `recon`.
